@@ -12,6 +12,7 @@ type PredictionResponse = {
 type BatchStatus = "idle" | "uploading" | "processing" | "error" | "done";
 type ViewMode = "single" | "batch";
 
+
 type BatchMetrics = {
   accuracy: string;
   precision: string;
@@ -38,6 +39,9 @@ const MAX_PREVIEW_COLS = 5;
 
 const DEFAULT_TEXT =
   "Wer so handelt, liegt moralisch daneben, und die Gesellschaft darf das nicht akzeptieren.";
+
+const INITIAL_VIEW_MODE: ViewMode = "single";
+const INITIAL_TEXT = DEFAULT_TEXT;
 
 const parseCsvLine = (line: string): string[] => {
   const cells: string[] = [];
@@ -78,10 +82,18 @@ const parseCsvPreview = (text: string): string[][] => {
   });
 };
 
+const parseCsvAll = (text: string): string[][] => {
+  const rows = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  return rows.map((row) => parseCsvLine(row));
+};
+
 export default function Home() {
   const currentYear = new Date().getFullYear();
   const [text, setText] = useState(DEFAULT_TEXT);
-  const [viewMode, setViewMode] = useState<ViewMode>("single");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "single";
+    return (sessionStorage.getItem("viewMode") as ViewMode) || "single";
+  });
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
@@ -89,10 +101,13 @@ export default function Home() {
   const [batchStatus, setBatchStatus] = useState<BatchStatus>("idle");
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
-  const [batchOutputFormat, setBatchOutputFormat] = useState<"csv" | "json">(
-    "csv"
-  );
+  const [batchOutputFormat, setBatchOutputFormat] = useState<
+    "csv" | "json" | null
+  >(null);
   const [batchFilename, setBatchFilename] = useState<string | null>(null);
+  const [batchMetricsFilename, setBatchMetricsFilename] = useState<
+    string | null
+  >(null);
   const [batchJobId, setBatchJobId] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<number>(0);
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
@@ -123,6 +138,35 @@ export default function Home() {
       }
     };
   }, [batchDownloadUrl]);
+
+  const resetAppState = () => {
+      sessionStorage.setItem("viewMode", "single");
+
+      setText(INITIAL_TEXT);
+      setStatus("idle");
+      setErrorMessage(null);
+      setResult(null);
+
+      setBatchFile(null);
+      setBatchStatus("idle");
+      setBatchError(null);
+      setBatchDownloadUrl(null);
+      setBatchOutputFormat(null);
+      setBatchFilename(null);
+      setBatchMetricsFilename(null);
+      setBatchJobId(null);
+      setBatchProgress(0);
+      setBatchProcessed(0);
+      setBatchTotal(0);
+
+      setInputPreview([]);
+      setOutputPreview([]);
+      setOutputPreviewJson(null);
+      setBatchMetrics(null);
+
+      setInputPreviewNote("Upload a CSV file to see a preview.");
+      setOutputPreviewNote("Run a batch request to see the output preview.");
+    };
 
   const handleBatchFileChange = async (file: File | null) => {
     setBatchFile(file);
@@ -158,6 +202,7 @@ export default function Home() {
 
     setStatus("loading");
     setErrorMessage(null);
+    setResult(null);
 
     try {
       const response = await fetch("http://localhost:8000/predict", {
@@ -186,7 +231,7 @@ export default function Home() {
     event: React.FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
-    if (!batchFile) return;
+    if (!batchFile || !batchOutputFormat) return;
 
     setBatchStatus("uploading");
     setBatchError(null);
@@ -199,6 +244,7 @@ export default function Home() {
       URL.revokeObjectURL(batchDownloadUrl);
       setBatchDownloadUrl(null);
     }
+    setBatchMetricsFilename(null);
 
     try {
       const formData = new FormData();
@@ -248,6 +294,11 @@ export default function Home() {
           const baseName =
             batchFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
           const extension = batchOutputFormat === "json" ? "json" : "csv";
+          if (statusPayload.metrics) {
+            const metricsExtension =
+              batchOutputFormat === "json" ? "json" : "csv";
+            setBatchMetricsFilename(`${baseName}-metrics.${metricsExtension}`);
+          }
 
           if (batchOutputFormat === "json") {
             const textContent = await resultResponse.text();
@@ -264,14 +315,14 @@ export default function Home() {
               type: "application/json",
             });
             const downloadUrl = URL.createObjectURL(blob);
-            setBatchFilename(`${baseName}.${extension}`);
+            setBatchFilename(`${baseName}-results.${extension}`);
             setBatchDownloadUrl(downloadUrl);
             setBatchStatus("done");
             return true;
           }
 
           const csvText = await resultResponse.text();
-          const preview = parseCsvPreview(csvText);
+          const preview = parseCsvAll(csvText);
           setOutputPreview(preview);
           setOutputPreviewNote(
             preview.length ? null : "No rows detected in the CSV output."
@@ -280,7 +331,7 @@ export default function Home() {
 
           const blob = new Blob([csvText], { type: "text/csv" });
           const downloadUrl = URL.createObjectURL(blob);
-          setBatchFilename(`${baseName}.${extension}`);
+          setBatchFilename(`${baseName}-results.${extension}`);
           setBatchDownloadUrl(downloadUrl);
           setBatchStatus("done");
           return true;
@@ -312,6 +363,42 @@ export default function Home() {
     }
   };
 
+  const handleResultsDownload = () => {
+    if (!batchDownloadUrl || !batchFilename) return;
+    const link = document.createElement("a");
+    link.href = batchDownloadUrl;
+    link.download = batchFilename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleMetricsDownload = () => {
+    if (!batchMetrics || !batchOutputFormat) return;
+    const header = "accuracy,precision,recall,f1,tp,fp,tn,fn";
+    const row =
+      `${batchMetrics.accuracy},${batchMetrics.precision},` +
+      `${batchMetrics.recall},${batchMetrics.f1},${batchMetrics.tp},` +
+      `${batchMetrics.fp},${batchMetrics.tn},${batchMetrics.fn}`;
+    const metricsText =
+      batchOutputFormat === "json"
+        ? JSON.stringify(batchMetrics, null, 2)
+        : `${header}\n${row}`;
+    const metricsBlob = new Blob([metricsText], {
+      type: batchOutputFormat === "json" ? "application/json" : "text/csv",
+    });
+    const metricsUrl = URL.createObjectURL(metricsBlob);
+    const link = document.createElement("a");
+    link.href = metricsUrl;
+    link.download =
+      batchMetricsFilename ??
+      `metrics.${batchOutputFormat === "json" ? "json" : "csv"}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(metricsUrl);
+  };
+
   return (
     <div className={styles.page}>
       <main className={styles.main}>
@@ -330,20 +417,28 @@ export default function Home() {
                 viewMode === "single" ? styles.modeTabActive : ""
               }`}
               type="button"
-              onClick={() => setViewMode("single")}
+              onClick={() => {
+                setViewMode("single");
+                sessionStorage.setItem("viewMode", "single");
+              }}
             >
               Single text
             </button>
+
             <button
               className={`${styles.modeTab} ${
                 viewMode === "batch" ? styles.modeTabActive : ""
               }`}
               type="button"
-              onClick={() => setViewMode("batch")}
+              onClick={() => {
+                setViewMode("batch");
+                sessionStorage.setItem("viewMode", "batch");
+              }}
             >
               Batch processing
             </button>
           </div>
+
           <p className={styles.modeHint}>
             {viewMode === "single"
               ? "Analyze one sentence at a time."
@@ -380,18 +475,20 @@ export default function Home() {
               </form>
             </section>
 
-            <section className={styles.resultCard}>
-              <div>
-                <p className={styles.resultLabel}>Prediction</p>
-                <p className={styles.resultValue}>
-                  {result ? result.label.replace("_", " ") : "No result yet"}
-                </p>
-              </div>
-              <div>
-                <p className={styles.resultLabel}>Confidence</p>
-                <p className={styles.resultValue}>{confidenceLabel}</p>
-              </div>
-            </section>
+            {result && (
+              <section className={styles.resultCard}>
+                <div>
+                  <p className={styles.resultLabel}>Prediction</p>
+                  <p className={styles.resultValue}>
+                    {result.label.replace("_", " ")}
+                  </p>
+                </div>
+                <div>
+                  <p className={styles.resultLabel}>Confidence</p>
+                  <p className={styles.resultValue}>{confidenceLabel}</p>
+                </div>
+              </section>
+            )}
 
             {status === "error" && (
               <p className={styles.errorMessage}>{errorMessage}</p>
@@ -404,11 +501,9 @@ export default function Home() {
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
                 <div className={styles.formatList}>
-                  <p>CSV: optional id column first, then text (or header named text).</p>
-                  <p>Optional label column: label.</p>
-                  <p>JSON: array of objects with text and optional label/id.</p>
-                  <p>Labels: true/false, 0/1, moralization/no_moralization.</p>
-                  <p>If no id is provided, ids are auto-generated.</p>
+                  <p><b>Optional columns:</b> id and label (moralization/no_moralization, true/false, 0/1).</p>
+                  <p>If <b>no ids</b> are provided, ids are auto-generated.</p>
+                  <p>If <b>no labels</b> are provided, metrics are not calculated.</p>
                 </div>
                 <div className={styles.formatSamples}>
                   <div>
@@ -427,7 +522,8 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className={styles.highlightSection}>
+              <div className={styles.sectionBox}>
+                <p className={styles.previewTitle}>Upload input file ...</p>
                 <input
                   className={styles.fileInput}
                   type="file"
@@ -438,77 +534,85 @@ export default function Home() {
                 />
               </div>
 
-              <div className={styles.previewCard}>
-                <p className={styles.previewTitle}>Input preview (CSV)</p>
-                {inputPreview.length > 0 ? (
-                  <table className={styles.previewTable}>
-                    <tbody>
-                      {inputPreview.map((row, rowIndex) => (
-                        <tr key={`input-row-${rowIndex}`}>
-                          {row.map((cell, cellIndex) => (
-                            <td key={`input-cell-${rowIndex}-${cellIndex}`}>
-                              {cell || "--"}
-                            </td>
+              {batchFile && (
+                <div className={`${styles.previewCard} ${styles.fadeInSection}`}>
+                  <p className={styles.previewTitle}>Input preview</p>
+                  {inputPreview.length > 0 ? (
+                    <div className={styles.previewScroll}>
+                      <table className={styles.previewTable}>
+                        <tbody>
+                          {inputPreview.map((row, rowIndex) => (
+                            <tr key={`input-row-${rowIndex}`}>
+                              {row.map((cell, cellIndex) => (
+                                <td key={`input-cell-${rowIndex}-${cellIndex}`}>
+                                  {cell || "--"}
+                                </td>
+                              ))}
+                            </tr>
                           ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className={styles.previewEmpty}>{inputPreviewNote}</p>
-                )}
-              </div>
-
-              <div className={`${styles.batchActions} ${styles.highlightSection}`}>
-                <label className={styles.selectLabel} htmlFor="outputFormat">
-                  Output format
-                </label>
-                <select
-                  id="outputFormat"
-                  className={styles.select}
-                  value={batchOutputFormat}
-                  onChange={(event) =>
-                    setBatchOutputFormat(
-                      event.target.value === "json" ? "json" : "csv"
-                    )
-                  }
-                >
-                  <option value="csv">CSV</option>
-                  <option value="json">JSON</option>
-                </select>
-
-                <div className={styles.progressWrap}>
-                  <button
-                    className={styles.secondaryButton}
-                    type="submit"
-                    disabled={!batchFile || batchStatus === "uploading"}
-                  >
-                    {batchStatus === "uploading" || batchStatus === "processing"
-                      ? "Processing..."
-                      : "Run batch"}
-                  </button>
-                  {(batchStatus === "uploading" || batchStatus === "processing") && (
-                    <div className={styles.progressBar}>
-                      <span className={styles.progressFill} />
+                        </tbody>
+                      </table>
                     </div>
-                  )}
-                  {batchStatus === "processing" && (
-                    <p className={styles.progressText}>
-                      {batchProgress}% ({batchProcessed}/{batchTotal})
-                    </p>
+                  ) : (
+                    <p className={styles.previewEmpty}>{inputPreviewNote}</p>
                   )}
                 </div>
+              )}
 
-                {batchDownloadUrl && batchFilename && (
-                  <a
-                    className={styles.downloadLink}
-                    href={batchDownloadUrl}
-                    download={batchFilename}
+              {batchFile && (
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <p className={styles.previewTitle}>Select output file format ...</p>
+                  <select
+                    id="outputFormat"
+                    className={`${styles.select} ${styles.primarySelect}`}
+                    value={batchOutputFormat ?? ""}
+                    onChange={(event) =>
+                      setBatchOutputFormat(
+                        event.target.value === "json"
+                          ? "json"
+                          : event.target.value === "csv"
+                            ? "csv"
+                            : null
+                      )
+                    }
+                    required
                   >
-                    Download results
-                  </a>
-                )}
-              </div>
+                    <option value="" disabled>
+                      Select format
+                    </option>
+                    <option value="csv">CSV</option>
+                    <option value="json">JSON</option>
+                  </select>
+                </div>
+              )}
+
+              {batchFile && batchOutputFormat && (
+                <div className={`${styles.batchActions} ${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <div className={styles.progressWrap}>
+                    <button
+                      className={styles.primaryButton}
+                      type="submit"
+                      disabled={
+                        !batchFile || !batchOutputFormat || batchStatus === "uploading"
+                      }
+                    >
+                      {batchStatus === "uploading" || batchStatus === "processing"
+                        ? "Processing..."
+                        : "Run batch"}
+                    </button>
+                    {(batchStatus === "uploading" || batchStatus === "processing") && (
+                      <div className={styles.progressBar}>
+                        <span className={styles.progressFill} />
+                      </div>
+                    )}
+                    {batchStatus === "processing" && (
+                      <p className={styles.progressText}>
+                        {batchProgress}% ({batchProcessed}/{batchTotal})
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </form>
 
             {batchStatus === "error" && (
@@ -523,19 +627,21 @@ export default function Home() {
                   </p>
                   {batchOutputFormat === "csv" ? (
                     outputPreview.length > 0 ? (
-                      <table className={styles.previewTable}>
-                        <tbody>
-                          {outputPreview.map((row, rowIndex) => (
-                            <tr key={`output-row-${rowIndex}`}>
-                              {row.map((cell, cellIndex) => (
-                                <td key={`output-cell-${rowIndex}-${cellIndex}`}>
-                                  {cell || "--"}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <div className={styles.previewScroll}>
+                        <table className={styles.previewTable}>
+                          <tbody>
+                            {outputPreview.map((row, rowIndex) => (
+                              <tr key={`output-row-${rowIndex}`}>
+                                {row.map((cell, cellIndex) => (
+                                  <td key={`output-cell-${rowIndex}-${cellIndex}`}>
+                                    {cell || "--"}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
                       <p className={styles.previewEmpty}>{outputPreviewNote}</p>
                     )
@@ -588,19 +694,65 @@ export default function Home() {
                 </div>
               )}
             </div>
+
+            {(batchDownloadUrl || batchMetrics) && (
+              <div className={`${styles.downloadSection} ${styles.fadeInSection}`}>
+                <div className={styles.downloadLinks}>
+                  {batchDownloadUrl && batchFilename && (
+                    <button
+                      className={`${styles.primaryButton} ${styles.downloadButton}`}
+                      type="button"
+                      onClick={handleResultsDownload}
+                    >
+                      Download results
+                    </button>
+                  )}
+                  {batchMetrics && (
+                    <button
+                      className={`${styles.primaryButton} ${styles.downloadButton}`}
+                      type="button"
+                      onClick={handleMetricsDownload}
+                    >
+                      Download metrics
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            {(batchDownloadUrl || batchMetrics) && (
+              <div className={`${styles.downloadSection} ${styles.fadeInSection}`}>
+                <div className={styles.downloadLinks}>
+                  {batchDownloadUrl && batchFilename && (
+                    <button
+                      className={`${styles.dangerButton} ${styles.downloadButton}`}
+                      type="button"
+                      onClick={resetAppState}
+                    >
+                      Restart
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
         )}
-        <footer className={styles.footer}>
-          <span>© {currentYear} Mirko Sommer. All rights reserved.</span>
-          <span className={styles.footerDivider}>|</span>
+      <footer className={styles.footer}>
+        <div className={styles.footerRow}>
+          <span>
+            © {currentYear} CHAI Lab - Department of German Language and Literature, University Heidelberg. All rights reserved.
+          </span>
+        </div>
+
+        <div className={styles.footerRow}>
           <a className={styles.footerLink} href="/impressum">
             Legal Notice / Impressum
           </a>
-          <span className={styles.footerDivider}>|</span>
+          <span className={styles.footerDivider}> | </span>
           <a className={styles.footerLink} href="/datenschutz">
             Privacy Policy / Datenschutz
           </a>
-        </footer>
+        </div>
+      </footer>
       </main>
     </div>
   );

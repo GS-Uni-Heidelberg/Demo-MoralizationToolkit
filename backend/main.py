@@ -230,10 +230,6 @@ def label_to_binary(label: str) -> int:
     raise ValueError(f"Unknown prediction label: {label}")
 
 
-def binary_to_label(value: int) -> str:
-    return "moralization" if value == 1 else "no_moralization"
-
-
 def compute_metrics(true_labels: list[int], predicted_labels: list[int]) -> dict[str, str]:
     if len(true_labels) != len(predicted_labels):
         raise ValueError("Label lengths do not match.")
@@ -271,20 +267,20 @@ def run_batch_job(job: BatchJob) -> None:
         confidence_str = f"{prediction.confidence:.4f}"
         result_item = {"id": job.ids[index - 1], "text": text}
         if job.labels:
-            result_item["true_label"] = binary_to_label(job.labels[index - 1])
+            result_item["true_label"] = "moralization" if job.labels[index - 1] == 1 else "no_moralization"
         result_item["label"] = prediction.label
         result_item["confidence"] = confidence_str
         results.append(result_item)
         job.processed = index
 
+    # Ensure true_label is always the normalized string
     if job.labels:
+        for idx, item in enumerate(results):
+            item["true_label"] = "moralization" if job.labels[idx] == 1 else "no_moralization"
         job.metrics = compute_metrics(job.labels, predicted_binary)
 
     if job.output_format == "json":
-        payload: dict[str, object] = {"results": results}
-        if job.metrics:
-            payload["metrics"] = job.metrics
-        job.result_json = payload
+        job.result_json = {"results": results}
     else:
         output = io.StringIO()
         fieldnames = ["id", "text", "label", "confidence"]
