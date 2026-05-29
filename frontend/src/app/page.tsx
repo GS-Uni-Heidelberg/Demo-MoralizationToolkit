@@ -9,11 +9,32 @@ type PredictionResponse = {
   confidence: number;
 };
 
-type BatchStatus = "idle" | "uploading" | "error" | "done";
+type BatchStatus = "idle" | "uploading" | "processing" | "error" | "done";
 type ViewMode = "single" | "batch";
 
+type BatchMetrics = {
+  accuracy: string;
+  precision: string;
+  recall: string;
+  f1: string;
+  tp: string;
+  fp: string;
+  tn: string;
+  fn: string;
+};
+
+type BatchStatusResponse = {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  processed: number;
+  total: number;
+  progress: number;
+  metrics?: BatchMetrics;
+  error?: string;
+};
+
 const MAX_PREVIEW_ROWS = 5;
-const MAX_PREVIEW_COLS = 4;
+const MAX_PREVIEW_COLS = 5;
 
 const DEFAULT_TEXT =
   "Wer so handelt, liegt moralisch daneben, und die Gesellschaft darf das nicht akzeptieren.";
@@ -58,6 +79,7 @@ const parseCsvPreview = (text: string): string[][] => {
 };
 
 export default function Home() {
+  const currentYear = new Date().getFullYear();
   const [text, setText] = useState(DEFAULT_TEXT);
   const [viewMode, setViewMode] = useState<ViewMode>("single");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -71,11 +93,16 @@ export default function Home() {
     "csv"
   );
   const [batchFilename, setBatchFilename] = useState<string | null>(null);
+  const [batchJobId, setBatchJobId] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState<number>(0);
+  const [batchProcessed, setBatchProcessed] = useState<number>(0);
+  const [batchTotal, setBatchTotal] = useState<number>(0);
   const [inputPreview, setInputPreview] = useState<string[][]>([]);
   const [outputPreview, setOutputPreview] = useState<string[][]>([]);
   const [outputPreviewJson, setOutputPreviewJson] = useState<string | null>(
     null
   );
+  const [batchMetrics, setBatchMetrics] = useState<BatchMetrics | null>(null);
   const [inputPreviewNote, setInputPreviewNote] = useState<string | null>(
     "Upload a CSV file to see a preview."
   );
@@ -164,6 +191,10 @@ export default function Home() {
     setBatchStatus("uploading");
     setBatchError(null);
     setOutputPreviewJson(null);
+    setBatchMetrics(null);
+    setBatchProgress(0);
+    setBatchProcessed(0);
+    setBatchTotal(0);
     if (batchDownloadUrl) {
       URL.revokeObjectURL(batchDownloadUrl);
       setBatchDownloadUrl(null);
@@ -174,7 +205,7 @@ export default function Home() {
       formData.append("file", batchFile);
       formData.append("output_format", batchOutputFormat);
 
-      const response = await fetch("http://localhost:8000/batch", {
+      const response = await fetch("http://localhost:8000/batch/start", {
         method: "POST",
         body: formData,
       });
@@ -184,30 +215,95 @@ export default function Home() {
         throw new Error(message || "Batch request failed");
       }
 
-      const blob = await response.blob();
-      const downloadUrl = URL.createObjectURL(blob);
-      const baseName = batchFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
-      const extension = batchOutputFormat === "json" ? "json" : "csv";
+      const startPayload = (await response.json()) as { job_id: string };
+      setBatchJobId(startPayload.job_id);
+      setBatchStatus("processing");
 
-      if (batchOutputFormat === "csv") {
-        const textContent = await blob.text();
-        const preview = parseCsvPreview(textContent);
-        setOutputPreview(preview);
-        setOutputPreviewNote(
-          preview.length ? null : "No rows detected in the CSV output."
+      const pollStatus = async () => {
+        const statusResponse = await fetch(
+          `http://localhost:8000/batch/status/${startPayload.job_id}`
         );
-        setOutputPreviewJson(null);
-      } else {
-        const textContent = await blob.text();
-        const prettyJson = JSON.stringify(JSON.parse(textContent), null, 2);
-        setOutputPreview([]);
-        setOutputPreviewJson(prettyJson);
-        setOutputPreviewNote(null);
-      }
+        if (!statusResponse.ok) {
+          const message = await statusResponse.text();
+          throw new Error(message || "Status request failed");
+        }
 
-      setBatchFilename(`${baseName}.${extension}`);
-      setBatchDownloadUrl(downloadUrl);
-      setBatchStatus("done");
+        const statusPayload = (await statusResponse.json()) as BatchStatusResponse;
+        setBatchProgress(statusPayload.progress);
+        setBatchProcessed(statusPayload.processed);
+        setBatchTotal(statusPayload.total);
+        if (statusPayload.metrics) {
+          setBatchMetrics(statusPayload.metrics);
+        }
+
+        if (statusPayload.status === "completed") {
+          const resultResponse = await fetch(
+            `http://localhost:8000/batch/result/${startPayload.job_id}`
+          );
+          if (!resultResponse.ok) {
+            const message = await resultResponse.text();
+            throw new Error(message || "Result request failed");
+          }
+
+          const baseName =
+            batchFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
+          const extension = batchOutputFormat === "json" ? "json" : "csv";
+
+          if (batchOutputFormat === "json") {
+            const textContent = await resultResponse.text();
+            const prettyJson = JSON.stringify(
+              JSON.parse(textContent),
+              null,
+              2
+            );
+            setOutputPreview([]);
+            setOutputPreviewJson(prettyJson);
+            setOutputPreviewNote(null);
+
+            const blob = new Blob([textContent], {
+              type: "application/json",
+            });
+            const downloadUrl = URL.createObjectURL(blob);
+            setBatchFilename(`${baseName}.${extension}`);
+            setBatchDownloadUrl(downloadUrl);
+            setBatchStatus("done");
+            return true;
+          }
+
+          const csvText = await resultResponse.text();
+          const preview = parseCsvPreview(csvText);
+          setOutputPreview(preview);
+          setOutputPreviewNote(
+            preview.length ? null : "No rows detected in the CSV output."
+          );
+          setOutputPreviewJson(null);
+
+          const blob = new Blob([csvText], { type: "text/csv" });
+          const downloadUrl = URL.createObjectURL(blob);
+          setBatchFilename(`${baseName}.${extension}`);
+          setBatchDownloadUrl(downloadUrl);
+          setBatchStatus("done");
+          return true;
+        }
+
+        if (statusPayload.status === "failed") {
+          throw new Error(statusPayload.error || "Batch failed");
+        }
+
+        return false;
+      };
+
+      const pollLoop = async () => {
+        let completed = false;
+        while (!completed) {
+          completed = await pollStatus();
+          if (!completed) {
+            await new Promise((resolve) => setTimeout(resolve, 600));
+          }
+        }
+      };
+
+      await pollLoop();
     } catch (error) {
       setBatchStatus("error");
       setBatchError(
@@ -220,10 +316,10 @@ export default function Home() {
     <div className={styles.page}>
       <main className={styles.main}>
         <section className={styles.hero}>
-          <p className={styles.eyebrow}>Moralization Detection Demo</p>
-          <h1>Check moral framing in a single sentence.</h1>
+          <p className={styles.eyebrow}>Moralization Detection</p>
+          <h1>Analyze moral framing in German texts.</h1>
           <p className={styles.subtitle}>
-            CPU-only RoBERTa inference. No accounts, no storage, instant feedback.
+            CPU-only RoBERTa inference with single text and batch processing.
           </p>
         </section>
 
@@ -303,92 +399,45 @@ export default function Home() {
           </>
         ) : (
           <section className={styles.batchPanel}>
-            <div className={styles.batchHeader}
-            >
-              <div>
-                <p className={styles.resultLabel}>Batch processing</p>
-                <p className={styles.batchTitle}>Upload CSV or JSON</p>
-              </div>
-              <span className={styles.hint}>Column or field name: text</span>
-            </div>
 
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
-              <input
-                className={styles.fileInput}
-                type="file"
-                accept=".csv,.json,application/json,text/csv"
-                onChange={(event) =>
-                  handleBatchFileChange(event.target.files?.[0] ?? null)
-                }
-              />
-
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
                 <div className={styles.formatList}>
-                  <p>CSV: header named text or first column is text.</p>
-                  <p>JSON: array of objects with only the text field.</p>
-                  <p>UTF-8 recommended, max 5000 chars per row.</p>
+                  <p>CSV: optional id column first, then text (or header named text).</p>
+                  <p>Optional label column: label.</p>
+                  <p>JSON: array of objects with text and optional label/id.</p>
+                  <p>Labels: true/false, 0/1, moralization/no_moralization.</p>
+                  <p>If no id is provided, ids are auto-generated.</p>
                 </div>
                 <div className={styles.formatSamples}>
                   <div>
                     <p className={styles.sampleLabel}>CSV</p>
-                    <pre className={styles.formatSample}>{`text
-Das ist absolut richtig.
-So etwas darf niemand tolerieren.`}</pre>
+                    <pre className={styles.formatSample}>{`id,text,label
+1,Das ist absolut richtig.,moralization
+2,So etwas darf niemand tolerieren.,1`}</pre>
                   </div>
                   <div>
                     <p className={styles.sampleLabel}>JSON</p>
                     <pre className={styles.formatSample}>{`[
-  {"text": "Das ist absolut richtig."},
-  {"text": "So etwas darf niemand tolerieren."}
+  {"id": 1, "text": "Das ist absolut richtig.", "label": "moralization"},
+  {"id": 2, "text": "So etwas darf niemand tolerieren.", "label": 1}
 ]`}</pre>
                   </div>
                 </div>
               </div>
 
-              <div className={styles.batchActions}>
-                <label className={styles.selectLabel} htmlFor="outputFormat">
-                  Output format
-                </label>
-                <select
-                  id="outputFormat"
-                  className={styles.select}
-                  value={batchOutputFormat}
+              <div className={styles.highlightSection}>
+                <input
+                  className={styles.fileInput}
+                  type="file"
+                  accept=".csv,.json,application/json,text/csv"
                   onChange={(event) =>
-                    setBatchOutputFormat(
-                      event.target.value === "json" ? "json" : "csv"
-                    )
+                    handleBatchFileChange(event.target.files?.[0] ?? null)
                   }
-                >
-                  <option value="csv">CSV</option>
-                  <option value="json">JSON</option>
-                </select>
-
-                <button
-                  className={styles.secondaryButton}
-                  type="submit"
-                  disabled={!batchFile || batchStatus === "uploading"}
-                >
-                  {batchStatus === "uploading" ? "Processing..." : "Run batch"}
-                </button>
-
-                {batchDownloadUrl && batchFilename && (
-                  <a
-                    className={styles.downloadLink}
-                    href={batchDownloadUrl}
-                    download={batchFilename}
-                  >
-                    Download results
-                  </a>
-                )}
+                />
               </div>
-            </form>
 
-            {batchStatus === "error" && (
-              <p className={styles.errorMessage}>{batchError}</p>
-            )}
-
-            <div className={styles.previewGrid}>
               <div className={styles.previewCard}>
                 <p className={styles.previewTitle}>Input preview (CSV)</p>
                 {inputPreview.length > 0 ? (
@@ -409,37 +458,149 @@ So etwas darf niemand tolerieren.`}</pre>
                   <p className={styles.previewEmpty}>{inputPreviewNote}</p>
                 )}
               </div>
-              <div className={styles.previewCard}>
-                <p className={styles.previewTitle}>
-                  Output preview ({batchOutputFormat.toUpperCase()})
-                </p>
-                {batchOutputFormat === "csv" ? (
-                  outputPreview.length > 0 ? (
-                    <table className={styles.previewTable}>
-                      <tbody>
-                        {outputPreview.map((row, rowIndex) => (
-                          <tr key={`output-row-${rowIndex}`}>
-                            {row.map((cell, cellIndex) => (
-                              <td key={`output-cell-${rowIndex}-${cellIndex}`}>
-                                {cell || "--"}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className={styles.previewEmpty}>{outputPreviewNote}</p>
-                  )
-                ) : outputPreviewJson ? (
-                  <pre className={styles.previewJson}>{outputPreviewJson}</pre>
-                ) : (
-                  <p className={styles.previewEmpty}>{outputPreviewNote}</p>
+
+              <div className={`${styles.batchActions} ${styles.highlightSection}`}>
+                <label className={styles.selectLabel} htmlFor="outputFormat">
+                  Output format
+                </label>
+                <select
+                  id="outputFormat"
+                  className={styles.select}
+                  value={batchOutputFormat}
+                  onChange={(event) =>
+                    setBatchOutputFormat(
+                      event.target.value === "json" ? "json" : "csv"
+                    )
+                  }
+                >
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                </select>
+
+                <div className={styles.progressWrap}>
+                  <button
+                    className={styles.secondaryButton}
+                    type="submit"
+                    disabled={!batchFile || batchStatus === "uploading"}
+                  >
+                    {batchStatus === "uploading" || batchStatus === "processing"
+                      ? "Processing..."
+                      : "Run batch"}
+                  </button>
+                  {(batchStatus === "uploading" || batchStatus === "processing") && (
+                    <div className={styles.progressBar}>
+                      <span className={styles.progressFill} />
+                    </div>
+                  )}
+                  {batchStatus === "processing" && (
+                    <p className={styles.progressText}>
+                      {batchProgress}% ({batchProcessed}/{batchTotal})
+                    </p>
+                  )}
+                </div>
+
+                {batchDownloadUrl && batchFilename && (
+                  <a
+                    className={styles.downloadLink}
+                    href={batchDownloadUrl}
+                    download={batchFilename}
+                  >
+                    Download results
+                  </a>
                 )}
               </div>
+            </form>
+
+            {batchStatus === "error" && (
+              <p className={styles.errorMessage}>{batchError}</p>
+            )}
+
+            <div className={styles.previewGrid}>
+              {(batchStatus === "done" || outputPreviewJson || outputPreview.length > 0) && (
+                <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
+                  <p className={styles.previewTitle}>
+                    Output preview ({batchOutputFormat.toUpperCase()})
+                  </p>
+                  {batchOutputFormat === "csv" ? (
+                    outputPreview.length > 0 ? (
+                      <table className={styles.previewTable}>
+                        <tbody>
+                          {outputPreview.map((row, rowIndex) => (
+                            <tr key={`output-row-${rowIndex}`}>
+                              {row.map((cell, cellIndex) => (
+                                <td key={`output-cell-${rowIndex}-${cellIndex}`}>
+                                  {cell || "--"}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className={styles.previewEmpty}>{outputPreviewNote}</p>
+                    )
+                  ) : outputPreviewJson ? (
+                    <pre className={styles.previewJson}>{outputPreviewJson}</pre>
+                  ) : (
+                    <p className={styles.previewEmpty}>{outputPreviewNote}</p>
+                  )}
+                </div>
+              )}
+              {batchMetrics && (
+                <div className={`${styles.resultCard} ${styles.metricsCard}`}>
+                  <span className={styles.metricsTitle}>Metrics</span>
+                  <div>
+                    <p className={styles.resultLabel}>Accuracy</p>
+                    <p className={styles.resultValue}>
+                      {batchMetrics.accuracy}
+                    </p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>Precision</p>
+                    <p className={styles.resultValue}>
+                      {batchMetrics.precision}
+                    </p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>Recall</p>
+                    <p className={styles.resultValue}>{batchMetrics.recall}</p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>F1</p>
+                    <p className={styles.resultValue}>{batchMetrics.f1}</p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>TP</p>
+                    <p className={styles.resultValue}>{batchMetrics.tp}</p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>FP</p>
+                    <p className={styles.resultValue}>{batchMetrics.fp}</p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>TN</p>
+                    <p className={styles.resultValue}>{batchMetrics.tn}</p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>FN</p>
+                    <p className={styles.resultValue}>{batchMetrics.fn}</p>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}
+        <footer className={styles.footer}>
+          <span>© {currentYear} Mirko Sommer. All rights reserved.</span>
+          <span className={styles.footerDivider}>|</span>
+          <a className={styles.footerLink} href="/impressum">
+            Legal Notice / Impressum
+          </a>
+          <span className={styles.footerDivider}>|</span>
+          <a className={styles.footerLink} href="/datenschutz">
+            Privacy Policy / Datenschutz
+          </a>
+        </footer>
       </main>
     </div>
   );

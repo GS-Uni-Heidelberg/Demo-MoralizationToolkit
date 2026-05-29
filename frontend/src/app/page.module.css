@@ -229,21 +229,6 @@
   animation: fadeIn 0.6s ease 0.3s both;
 }
 
-.batchHeader {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.batchTitle {
-  font-family: var(--font-display);
-  font-size: 20px;
-  color: var(--ink-900);
-  margin-top: 6px;
-}
-
 .batchForm {
   display: flex;
   flex-direction: column;
@@ -256,6 +241,7 @@
   border: 1px solid rgba(10, 24, 35, 0.12);
   background: #ffffff;
   font-family: var(--font-sans);
+  width: 100%;
 }
 
 .batchActions {
@@ -313,6 +299,57 @@
   text-decoration: underline;
 }
 
+.progressWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progressBar {
+  width: 160px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(10, 24, 35, 0.12);
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  width: 45%;
+  background: linear-gradient(120deg, #0a1823, #2f4f62);
+  animation: batchPulse 1.2s ease-in-out infinite;
+}
+
+.progressText {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-600);
+}
+
+@keyframes batchPulse {
+  0% {
+    transform: translateX(-30%);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translateX(60%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(140%);
+    opacity: 0.35;
+  }
+}
+
+.highlightSection {
+  border-radius: 14px;
+  border: 1px solid rgba(10, 24, 35, 0.12);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 24px rgba(10, 24, 35, 0.08);
+}
+
 .formatInfo {
   display: flex;
   flex-direction: column;
@@ -365,7 +402,7 @@
 
 .previewGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
 }
 
@@ -374,6 +411,10 @@
   border-radius: 14px;
   border: 1px solid rgba(10, 24, 35, 0.1);
   background: #ffffff;
+}
+
+.outputCard {
+  animation: fadeIn 0.6s ease 0.2s both;
 }
 
 .previewTitle {
@@ -398,6 +439,29 @@
   vertical-align: top;
 }
 
+.previewDark {
+  background: #0a1823;
+  color: #f9f4ec;
+  border-color: rgba(10, 24, 35, 0.2);
+}
+
+.previewDark .previewTitle {
+  color: rgba(249, 244, 236, 0.65);
+}
+
+.previewDark .previewTable td {
+  color: #f9f4ec;
+  border-bottom-color: rgba(249, 244, 236, 0.15);
+}
+
+.previewDark .previewJson {
+  color: #f9f4ec;
+}
+
+.previewDark .previewEmpty {
+  color: rgba(249, 244, 236, 0.75);
+}
+
 .previewJson {
   margin: 0;
   padding: 12px;
@@ -409,6 +473,44 @@
   line-height: 1.5;
   max-height: 240px;
   overflow: auto;
+}
+
+.metricsCard {
+  width: 100%;
+  position: relative;
+  padding-top: 36px;
+}
+
+.metricsTitle {
+  position: absolute;
+  top: 14px;
+  left: 24px;
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+  color: rgba(249, 244, 236, 0.65);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink-500);
+}
+
+.footerLink {
+  color: var(--ink-600);
+  text-decoration: underline;
+}
+
+.footerDivider {
+  color: var(--ink-400, #8b9aaa);
 }
 
 .previewEmpty {
@@ -452,4 +554,5 @@
     flex-direction: column;
     align-items: flex-start;
   }
+
 }

@@ -58,19 +58,21 @@ http://localhost:3000
 
 Upload CSV or JSON from the UI and download predictions.
 
-CSV format (first column or column named `text`):
+CSV format (first column or column named `text`, optional `label` column):
 
 ```csv
-text
-Das ist absolut richtig.
-So etwas darf niemand tolerieren.
+text,label
+Das ist absolut richtig.,moralization
+So etwas darf niemand tolerieren.,1
 ```
 
-JSON format (list of objects with only `text`):
+JSON format (list of objects with `text` and optional `label`):
 
 ```json
 [
-	{"text": "Das ist absolut richtig."},
-	{"text": "So etwas darf niemand tolerieren."}
+	{"text": "Das ist absolut richtig.", "label": "moralization"},
+	{"text": "So etwas darf niemand tolerieren.", "label": 1}
 ]
+
+Accepted label values: true/false, 0/1, moralization/no_moralization.
 ```
