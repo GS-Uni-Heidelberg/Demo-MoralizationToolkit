@@ -40,7 +40,6 @@ const MAX_PREVIEW_COLS = 5;
 const DEFAULT_TEXT =
   "Wer so handelt, liegt moralisch daneben, und die Gesellschaft darf das nicht akzeptieren.";
 
-const INITIAL_VIEW_MODE: ViewMode = "single";
 const INITIAL_TEXT = DEFAULT_TEXT;
 
 const parseCsvLine = (line: string): string[] => {
@@ -140,6 +139,12 @@ export default function Home() {
   }, [batchDownloadUrl]);
 
   const resetAppState = () => {
+      const ok = window.confirm(
+          "Reset the app?\n\nThis will clear:\n- input text\n- batch file\n- results\n- metrics\n- progress"
+        );
+
+        if (!ok) return;
+      
       sessionStorage.setItem("viewMode", "single");
 
       setText(INITIAL_TEXT);
