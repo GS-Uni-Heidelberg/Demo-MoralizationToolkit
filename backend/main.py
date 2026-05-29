@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
 import os
 from pathlib import Path
 
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -64,9 +68,53 @@ class ModelBundle:
 
         best_idx = int(torch.argmax(probs).item())
         label = str(self.id2label.get(best_idx, best_idx))
-        confidence = float(probs[best_idx].item())
+        confidence = round(float(probs[best_idx].item()), 4)
 
         return PredictResponse(label=label, confidence=confidence)
+
+
+def parse_csv_texts(raw_bytes: bytes) -> list[str]:
+    content = raw_bytes.decode("utf-8", errors="ignore")
+    reader = csv.DictReader(io.StringIO(content))
+    texts: list[str] = []
+
+    if reader.fieldnames and "text" in [name.strip().lower() for name in reader.fieldnames]:
+        for row in reader:
+            text = str(row.get("text", "")).strip()
+            if text:
+                texts.append(text)
+        return texts
+
+    fallback_reader = csv.reader(io.StringIO(content))
+    for row in fallback_reader:
+        if not row:
+            continue
+        text = str(row[0]).strip()
+        if text:
+            texts.append(text)
+
+    return texts
+
+
+def parse_json_texts(raw_bytes: bytes) -> list[str]:
+    content = raw_bytes.decode("utf-8", errors="ignore")
+    payload = json.loads(content)
+    texts: list[str] = []
+
+    if not isinstance(payload, list):
+        raise ValueError("JSON must be a list of objects with a text field.")
+
+    for item in payload:
+        if not isinstance(item, dict) or set(item.keys()) != {"text"}:
+            raise ValueError("Each JSON item must be an object with only a text field.")
+        text = str(item.get("text", "")).strip()
+        if text:
+            texts.append(text)
+
+    if not texts:
+        raise ValueError("No text values found in JSON.")
+
+    return texts
 
 
 try:
@@ -94,3 +142,66 @@ async def predict(request: PredictRequest) -> PredictResponse:
         return MODEL.predict(request.text)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/batch")
+async def batch_predict(
+    file: UploadFile = File(...),
+    output_format: str = Form("csv"),
+) -> Response:
+    if MODEL_ERROR or MODEL is None:
+        raise HTTPException(status_code=500, detail="Model failed to load")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    filename = (file.filename or "").lower()
+    content_type = (file.content_type or "").lower()
+
+    try:
+        if filename.endswith(".csv") or content_type in {"text/csv", "application/csv"}:
+            texts = parse_csv_texts(raw_bytes)
+        elif filename.endswith(".json") or content_type in {"application/json", "text/json"}:
+            texts = parse_json_texts(raw_bytes)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file type. Upload CSV or JSON.",
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not texts:
+        raise HTTPException(status_code=400, detail="No texts found in upload")
+
+    results = []
+    for text in texts:
+        prediction = MODEL.predict(text)
+        confidence_str = f"{prediction.confidence:.4f}"
+        results.append(
+            {
+                "text": text,
+                "label": prediction.label,
+                "confidence": confidence_str,
+            }
+        )
+
+    fmt = output_format.strip().lower()
+    if fmt == "json":
+        return JSONResponse(
+            content=results,
+            headers={"Content-Disposition": "attachment; filename=predictions.json"},
+        )
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["text", "label", "confidence"])
+    writer.writeheader()
+    writer.writerows(results)
+    csv_bytes = output.getvalue().encode("utf-8")
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=predictions.csv"},
+    )

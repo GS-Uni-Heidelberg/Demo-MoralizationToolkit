@@ -178,6 +178,245 @@
   padding: 12px 16px;
 }
 
+.modeSwitch {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modeTabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(10, 24, 35, 0.08);
+  width: fit-content;
+}
+
+.modeTab {
+  border: none;
+  background: transparent;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-600);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.modeTabActive {
+  background: #0a1823;
+  color: #f9f4ec;
+  box-shadow: 0 10px 20px rgba(10, 24, 35, 0.2);
+}
+
+.modeHint {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink-600);
+}
+
+.batchPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 26px;
+  border-radius: 20px;
+  border: 1px dashed rgba(10, 24, 35, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  animation: fadeIn 0.6s ease 0.3s both;
+}
+
+.batchHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.batchTitle {
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--ink-900);
+  margin-top: 6px;
+}
+
+.batchForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fileInput {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(10, 24, 35, 0.12);
+  background: #ffffff;
+  font-family: var(--font-sans);
+}
+
+.batchActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.selectLabel {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink-600);
+}
+
+.select {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(10, 24, 35, 0.2);
+  background: #fff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink-900);
+}
+
+.secondaryButton {
+  border: 1px solid rgba(10, 24, 35, 0.2);
+  border-radius: 999px;
+  padding: 10px 22px;
+  background: #fff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-900);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.secondaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.secondaryButton:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(10, 24, 35, 0.16);
+}
+
+.downloadLink {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: #1b4d6a;
+  text-decoration: underline;
+}
+
+.formatInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(10, 24, 35, 0.08);
+}
+
+.formatTitle {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.formatList {
+  display: grid;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink-600);
+}
+
+.formatSample {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #0a1823;
+  color: #f9f4ec;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.formatSamples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.sampleLabel {
+  margin: 0 0 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-600);
+}
+
+.previewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.previewCard {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(10, 24, 35, 0.1);
+  background: #ffffff;
+}
+
+.previewTitle {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-700);
+  margin-bottom: 10px;
+}
+
+.previewTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink-900);
+}
+
+.previewTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(10, 24, 35, 0.08);
+  vertical-align: top;
+}
+
+.previewJson {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #0a1823;
+  color: #f9f4ec;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.previewEmpty {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink-500);
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

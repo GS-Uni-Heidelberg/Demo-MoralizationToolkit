@@ -53,3 +53,24 @@ http://localhost:3000
 
 - CPU-only inference.
 - Backend uses CORS for http://localhost:3000.
+
+## Batch processing
+
+Upload CSV or JSON from the UI and download predictions.
+
+CSV format (first column or column named `text`):
+
+```csv
+text
+Das ist absolut richtig.
+So etwas darf niemand tolerieren.
+```
+
+JSON format (list of objects with only `text`):
+
+```json
+[
+	{"text": "Das ist absolut richtig."},
+	{"text": "So etwas darf niemand tolerieren."}
+]
+```
