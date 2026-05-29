@@ -225,6 +225,8 @@
   font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 600;
+  line-height: 1;
+  min-height: 44px;
   background: transparent;
   color: #0a1823;
   cursor: pointer;
@@ -557,7 +559,6 @@
 
 .previewTable {
   width: 100%;
-  min-width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
   font-family: var(--font-sans);
@@ -571,16 +572,24 @@
   max-width: 100%;
   width: 100%;
   box-sizing: border-box;
-  overflow-x: hidden;
 }
 
 .previewTable td {
   padding: 6px 8px;
   border-bottom: 1px solid rgba(10, 24, 35, 0.08);
   vertical-align: top;
-  width: 1%;
-  word-break: break-word;
+  white-space: normal;
   overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 420px;
+}
+
+.cellTruncate {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .previewDark {
@@ -619,6 +628,11 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.previewJsonLight {
+  background: #fefbf6;
+  color: var(--ink-900);
 }
 
 .metricsCard {

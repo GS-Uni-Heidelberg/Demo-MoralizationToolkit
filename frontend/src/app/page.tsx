@@ -42,57 +42,75 @@ const DEFAULT_TEXT =
 
 const INITIAL_TEXT = DEFAULT_TEXT;
 
-const parseCsvLine = (line: string): string[] => {
-  const cells: string[] = [];
-  let current = "";
+// Robust CSV parser that supports quoted fields with embedded newlines and
+// doubled-quote escapes. It returns an array of rows, each row an array of
+// cell strings. Empty rows (all cells empty) are omitted.
+const parseCsvText = (text: string): string[][] => {
+  const rows: string[][] = [];
+  let curCell = "";
+  let curRow: string[] = [];
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
 
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') {
+        curCell += '"';
         i += 1;
-      } else {
-        inQuotes = !inQuotes;
+        continue;
       }
+      inQuotes = !inQuotes;
       continue;
     }
 
-    if (char === "," && !inQuotes) {
-      cells.push(current.trim());
-      current = "";
+    if (ch === ',' && !inQuotes) {
+      curRow.push(curCell.trim());
+      curCell = "";
       continue;
     }
 
-    current += char;
+    if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      // Handle CRLF as a single newline
+      if (ch === '\r' && text[i + 1] === '\n') {
+        i += 1;
+      }
+      curRow.push(curCell.trim());
+      rows.push(curRow);
+      curRow = [];
+      curCell = "";
+      continue;
+    }
+
+    curCell += ch;
   }
 
-  cells.push(current.trim());
-  return cells;
+  // Push any remaining data as the last row
+  if (inQuotes) {
+    // If quotes were not closed, still push what we have to avoid breaking preview
+  }
+  if (curCell.length > 0 || curRow.length > 0) {
+    curRow.push(curCell.trim());
+    rows.push(curRow);
+  }
+
+  // Filter out completely empty rows
+  return rows.filter((r) => r.some((c) => c.length > 0));
 };
 
 const parseCsvPreview = (text: string): string[][] => {
-  const rows = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  return rows.slice(0, MAX_PREVIEW_ROWS).map((row) => {
-    const cells = parseCsvLine(row);
-    return cells.slice(0, MAX_PREVIEW_COLS);
-  });
+  const all = parseCsvText(text);
+  return all.slice(0, MAX_PREVIEW_ROWS).map((row) => row.slice(0, MAX_PREVIEW_COLS));
 };
 
 const parseCsvAll = (text: string): string[][] => {
-  const rows = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  return rows.map((row) => parseCsvLine(row));
+  return parseCsvText(text);
 };
 
 export default function Home() {
   const currentYear = new Date().getFullYear();
   const [text, setText] = useState(DEFAULT_TEXT);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    if (typeof window === "undefined") return "single";
-    return (sessionStorage.getItem("viewMode") as ViewMode) || "single";
-  });
+  const [viewMode, setViewMode] = useState<ViewMode>("single");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
@@ -112,13 +130,14 @@ export default function Home() {
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
   const [batchTotal, setBatchTotal] = useState<number>(0);
   const [inputPreview, setInputPreview] = useState<string[][]>([]);
+  const [inputPreviewJson, setInputPreviewJson] = useState<string | null>(null);
   const [outputPreview, setOutputPreview] = useState<string[][]>([]);
   const [outputPreviewJson, setOutputPreviewJson] = useState<string | null>(
     null
   );
   const [batchMetrics, setBatchMetrics] = useState<BatchMetrics | null>(null);
   const [inputPreviewNote, setInputPreviewNote] = useState<string | null>(
-    "Upload a CSV file to see a preview."
+    "Upload a CSV or JSON file to see a preview."
   );
   const [outputPreviewNote, setOutputPreviewNote] = useState<string | null>(
     "Run a batch request to see the output preview."
@@ -129,6 +148,17 @@ export default function Home() {
     if (!result) return "--";
     return `${(result.confidence * 100).toFixed(2)}%`;
   }, [result]);
+  const hasUnsavedData =
+    viewMode === "batch" &&
+    batchFile !== null;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = sessionStorage.getItem("viewMode") as ViewMode | null;
+    if (stored === "single" || stored === "batch") {
+      setViewMode(stored);
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -169,25 +199,47 @@ export default function Home() {
       setOutputPreviewJson(null);
       setBatchMetrics(null);
 
-      setInputPreviewNote("Upload a CSV file to see a preview.");
+      setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
       setOutputPreviewNote("Run a batch request to see the output preview.");
     };
+  
+  
+  useEffect(() => {
+  const handler = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedData) return;
 
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedData]);
+    
   const handleBatchFileChange = async (file: File | null) => {
     setBatchFile(file);
     setInputPreview([]);
-    setInputPreviewNote("Upload a CSV file to see a preview.");
+    setInputPreviewJson(null);
+    setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
 
     if (!file) return;
 
     const isCsv = file.name.toLowerCase().endsWith(".csv");
-    if (!isCsv) {
-      setInputPreviewNote("Input preview is available for CSV uploads only.");
+    const isJson = file.name.toLowerCase().endsWith(".json");
+    if (!isCsv && !isJson) {
+      setInputPreviewNote("Input preview is available for CSV or JSON uploads only.");
       return;
     }
 
     try {
       const textContent = await file.text();
+      if (isJson) {
+        const prettyJson = JSON.stringify(JSON.parse(textContent), null, 2);
+        setInputPreview([]);
+        setInputPreviewJson(prettyJson);
+        setInputPreviewNote(null);
+        return;
+      }
       const preview = parseCsvPreview(textContent);
       if (preview.length === 0) {
         setInputPreviewNote("No rows detected in the CSV file.");
@@ -316,7 +368,7 @@ export default function Home() {
             setOutputPreviewJson(prettyJson);
             setOutputPreviewNote(null);
 
-            const blob = new Blob([textContent], {
+            const blob = new Blob([prettyJson], {
               type: "application/json",
             });
             const downloadUrl = URL.createObjectURL(blob);
@@ -404,6 +456,14 @@ export default function Home() {
     URL.revokeObjectURL(metricsUrl);
   };
 
+  const truncateCell = (value: string | undefined | null, limit = 120) => {
+    if (!value) return "";
+    // collapse whitespace and newlines for preview
+    const collapsed = value.replace(/\s+/g, " ").trim();
+    if (collapsed.length <= limit) return collapsed;
+    return collapsed.slice(0, limit) + "…";
+  };
+
   return (
     <div className={styles.page}>
       <main className={styles.main}>
@@ -443,7 +503,8 @@ export default function Home() {
               Batch processing
             </button>
           </div>
-
+        </section>
+        <section>
           <p className={styles.modeHint}>
             {viewMode === "single"
               ? "Analyze one sentence at a time."
@@ -542,15 +603,21 @@ export default function Home() {
               {batchFile && (
                 <div className={`${styles.previewCard} ${styles.fadeInSection}`}>
                   <p className={styles.previewTitle}>Input preview</p>
-                  {inputPreview.length > 0 ? (
+                  {inputPreviewJson ? (
+                    <pre className={`${styles.previewJson} ${styles.previewJsonLight}`}>
+                      {inputPreviewJson}
+                    </pre>
+                  ) : inputPreview.length > 0 ? (
                     <div className={styles.previewScroll}>
                       <table className={styles.previewTable}>
                         <tbody>
-                          {inputPreview.map((row, rowIndex) => (
-                            <tr key={`input-row-${rowIndex}`}>
-                              {row.map((cell, cellIndex) => (
-                                <td key={`input-cell-${rowIndex}-${cellIndex}`}>
-                                  {cell || "--"}
+                            {inputPreview.map((row, i) => (
+                            <tr key={i}>
+                              {row.map((cell, j) => (
+                                <td key={j}>
+                                  <div className={styles.cellTruncate} title={String(cell)}>
+                                    {truncateCell(String(cell))}
+                                  </div>
                                 </td>
                               ))}
                             </tr>
@@ -559,7 +626,9 @@ export default function Home() {
                       </table>
                     </div>
                   ) : (
-                    <p className={styles.previewEmpty}>{inputPreviewNote}</p>
+                    <p className={styles.previewEmpty}>
+                      {inputPreviewNote || "No rows detected in the CSV file."}
+                    </p>
                   )}
                 </div>
               )}
@@ -635,11 +704,13 @@ export default function Home() {
                       <div className={styles.previewScroll}>
                         <table className={styles.previewTable}>
                           <tbody>
-                            {outputPreview.map((row, rowIndex) => (
-                              <tr key={`output-row-${rowIndex}`}>
-                                {row.map((cell, cellIndex) => (
-                                  <td key={`output-cell-${rowIndex}-${cellIndex}`}>
-                                    {cell || "--"}
+                            {outputPreview.map((row, i) => (
+                              <tr key={i}>
+                                {row.map((cell, j) => (
+                                  <td key={j}>
+                                    <div className={styles.cellTruncate} title={String(cell)}>
+                                      {truncateCell(String(cell))}
+                                    </div>
                                   </td>
                                 ))}
                               </tr>
@@ -648,7 +719,9 @@ export default function Home() {
                         </table>
                       </div>
                     ) : (
-                      <p className={styles.previewEmpty}>{outputPreviewNote}</p>
+                      <p className={styles.previewEmpty}>
+                        {outputPreviewNote || "No rows detected in the CSV file."}
+                      </p>
                     )
                   ) : outputPreviewJson ? (
                     <pre className={styles.previewJson}>{outputPreviewJson}</pre>
