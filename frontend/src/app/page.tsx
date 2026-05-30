@@ -55,7 +55,7 @@ const MAX_TEXT_LENGTH = 5000;
 const MAX_BATCH_INSTANCES = 500;
 
 const DEFAULT_TEXT =
-  "Wer so handelt, liegt moralisch daneben, und die Gesellschaft darf das nicht akzeptieren.";
+  "Aber den weiteren Ausgleich, den es dort gibt, den Ausgleich zwischen Arm und Reich, halten wir in der Gesundheitsversicherung für wenig treffsicher und deswegen für sozial ungerecht.";
 
 const INITIAL_TEXT = DEFAULT_TEXT;
 
@@ -135,6 +135,7 @@ export default function Home() {
   const [dimiStatus, setDimiStatus] = useState<"idle" | "loading" | "error">("idle");
   const [dimiError, setDimiError] = useState<string | null>(null);
   const [lemmaCount, setLemmaCount] = useState<number | null>(null);
+  const [dimiCopied, setDimiCopied] = useState<Record<number, boolean>>({});
 
   // Fetch lemma count whenever the selected language changes
   useEffect(() => {
@@ -629,47 +630,97 @@ export default function Home() {
 
     if (dimiResult.matches.length === 0) {
       return (
-        <p className={styles.previewEmpty}>
-          No dictionary lemmas found in the text ({dimiResult.total_sentences} sentence
-          {dimiResult.total_sentences !== 1 ? "s" : ""} analyzed).
-        </p>
+        <div className={styles.dimiResults}>
+          <p className={`${styles.hint} ${styles.resultLabel}`}>
+            No dictionary lemmas found in the text.
+          </p>
+        </div>
       );
     }
 
     return (
       <div className={styles.dimiResults}>
-        <p className={styles.hint}>
-          {dimiResult.matches.length} match
+        <p className={`${styles.hint} ${styles.resultLabel}`}>
+          {dimiResult.matches.length} Match
           {dimiResult.matches.length !== 1 ? "es" : ""} across{" "}
-          {dimiResult.total_sentences} sentence
+          {dimiResult.total_sentences} Sentence
           {dimiResult.total_sentences !== 1 ? "s" : ""}
         </p>
 
         {dimiResult.matches.map((match, i) => (
-          <div key={i} className={styles.dimiMatchCard}>
+          <div
+            key={i}
+            className={styles.dimiMatchCard}
+            role="button"
+            tabIndex={0}
+            onClick={async () => {
+              try {
+                const copyText = match.context_sentences.join(" ");
+                await navigator.clipboard.writeText(copyText);
+                setDimiCopied((s) => ({ ...(s || {}), [i]: true }));
+                setTimeout(() => setDimiCopied((s) => {
+                  const next = { ...(s || {}) };
+                  delete next[i];
+                  return next;
+                }), 1500);
+              } catch {
+                // ignore clipboard errors
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                (e.currentTarget as HTMLElement).click();
+              }
+            }}
+          >
+            <span
+              className={styles.copiedBadge}
+              aria-hidden="false"
+              aria-label={dimiCopied?.[i] ? "Copied" : "Click to copy"}
+            >
+              <span className={styles.copiedText}>
+                {dimiCopied?.[i] ? "Copied" : "Click to copy"}
+              </span>
+              <svg
+                className={styles.copiedSvg}
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path d="M16 1H4a2 2 0 0 0-2 2v14" stroke="#0a1823" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <rect x="8" y="4" width="13" height="13" rx="2" stroke="#0a1823" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="#fff8cc"/>
+              </svg>
+            </span>
+
+            <p className={styles.resultLabel}>
+              Sentence {match.sentence_index + 1}
+            </p>
             <p className={styles.dimiMatchMeta}>
-              Sentence {match.sentence_index + 1} ·{" "}
-              <span className={styles.dimiLemmaList}>
-                {match.matched_lemmas.join(", ")}
+              <span className={styles.resultLabelNormal}>
+                MATCHED LEMMAS: <span className={styles.dimiLemmaList}>{match.matched_lemmas.join(", ")}</span>
               </span>
             </p>
 
             <div className={styles.dimiContext}>
               {match.context_html.map((sentence, j) => {
-                // The center sentence (matched one) has <mark> tags from the backend.
-                // We use dangerouslySetInnerHTML only for that sentence; the rest are plain text.
                 const isCenterSentence =
                   match.context_sentences[j] === match.center_sentence;
 
-                return isCenterSentence ? (
-                  <span
-                    key={j}
-                    className={styles.dimiCenterSentence}
-                    dangerouslySetInnerHTML={{ __html: sentence }}
-                  />
-                ) : (
-                  <span key={j} className={styles.dimiContextSentence}>
-                    {sentence}
+                return (
+                  <span key={j}>
+                    {isCenterSentence ? (
+                      <span
+                        className={styles.dimiCenterSentence}
+                        dangerouslySetInnerHTML={{ __html: sentence }}
+                      />
+                    ) : (
+                      <span className={styles.dimiContextSentence}>{sentence}</span>
+                    )}
+                    {' '}
                   </span>
                 );
               })}
@@ -746,9 +797,8 @@ export default function Home() {
                           }`}
                           type="button"
                           onClick={() => {
-                            setDimiLanguage(option.code);
-                            setDimiResult(null);
-                          }}
+                                setDimiLanguage(option.code);
+                              }}
                           aria-pressed={dimiLanguage === option.code}
                           title={option.name}
                         >
@@ -758,7 +808,7 @@ export default function Home() {
                     </div>
                   </div>
                   <a className={styles.hint}>
-                    {lemmaCount !== null ? `${lemmaCount} lemmas in ${dimiLanguage.toUpperCase()} DiMi` : "loading lemmas…"}
+                    {lemmaCount !== null ? `${lemmaCount} lemmas in ${LANGUAGE_OPTIONS.find((o) => o.code === dimiLanguage)?.name || dimiLanguage}-DiMi` : "loading lemmas…"}
                   </a>
 
                   <label className={styles.label} htmlFor="dimiTextInput">
@@ -853,7 +903,7 @@ export default function Home() {
           <section className={styles.batchPanel}>
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
               <p className={styles.boxTitle}>
-                Pipeline Moralization Detection (DiMi + Language Models)
+                Pipeline Moralization Detection (Language Models)
               </p>
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
