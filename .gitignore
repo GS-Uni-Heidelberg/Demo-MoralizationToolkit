@@ -16,3 +16,5 @@ frontend/.env.local
 
 examples/test_Ernährungssicherheit_MoWiKo_Philo.json
 examples/test_Ernährung_output.json
+
+models
