@@ -12,6 +12,24 @@ type PredictionResponse = {
 type BatchStatus = "idle" | "uploading" | "processing" | "error" | "done";
 type ViewMode = "single" | "batch";
 
+type LanguageCode = "de" | "en" | "fr" | "it";
+
+type DimiToken = {
+  segment: string;
+  normalized: string;
+  lemma: string;
+  matched: boolean;
+  whitespace: boolean;
+};
+
+type DimiResult = {
+  language: LanguageCode;
+  tokens: DimiToken[];
+  matchedLemmas: string[];
+  matchedTokenCount: number;
+  tokenCount: number;
+};
+
 
 type BatchMetrics = {
   accuracy: string;
@@ -43,6 +61,162 @@ const DEFAULT_TEXT =
   "Wer so handelt, liegt moralisch daneben, und die Gesellschaft darf das nicht akzeptieren.";
 
 const INITIAL_TEXT = DEFAULT_TEXT;
+
+const LANGUAGE_OPTIONS: Array<{
+  code: LanguageCode;
+  label: string;
+  name: string;
+}> = [
+  { code: "de", label: "DE", name: "Deutsch" },
+  { code: "en", label: "EN", name: "English" },
+  { code: "fr", label: "FR", name: "Français" },
+  { code: "it", label: "IT", name: "Italiano" },
+];
+
+const DEMO_LEMMA_FAMILIES: Record<LanguageCode, Record<string, string[]>> = {
+  de: {
+    gerecht: ["gerecht", "gerechte", "gerechter", "gerechtes", "gerechtigkeit"],
+    moral: ["moral", "moralisch", "moralische", "moralischen"],
+    verantwortung: ["verantwortung", "verantwortlich", "verantwortliche", "verantwortlichen"],
+    respekt: ["respekt", "respektvoll", "respektvolle", "respektvollen"],
+    solidaritaet: ["solidarität", "solidarisch", "solidarische", "solidarischen"],
+    menschenwuerde: ["menschenwürde", "menschenwuerde"],
+    unfair: ["unfair", "ungerecht", "unmoralisch"],
+  },
+  en: {
+    fairness: ["fair", "fairness", "fairer", "fairest"],
+    moral: ["moral", "morally", "moralistic", "moralize", "moralized"],
+    responsibility: ["responsibility", "responsible", "responsibly"],
+    respect: ["respect", "respectful", "respectfully"],
+    solidarity: ["solidarity", "solidary", "supportive"],
+    dignity: ["dignity", "dignified"],
+    harmful: ["harm", "harmful", "harmfully", "harmfulness"],
+  },
+  fr: {
+    juste: ["juste", "justice", "justement", "justes"],
+    moral: ["moral", "morale", "moralement", "moraux"],
+    responsabilite: ["responsabilité", "responsable", "responsables"],
+    respect: ["respect", "respectueux", "respectueuse"],
+    dignite: ["dignité", "digne", "dignes"],
+    solidarite: ["solidarité", "solidaire", "solidaires"],
+    compassion: ["compassion", "compatissant", "compatissante"],
+  },
+  it: {
+    giusto: ["giusto", "giusta", "giustizia", "giusti", "giuste"],
+    morale: ["morale", "moralmente", "morali"],
+    responsabilita: ["responsabilità", "responsabile", "responsabili"],
+    rispetto: ["rispetto", "rispettoso", "rispettosa"],
+    dignita: ["dignità", "degno", "degna", "degni", "degne"],
+    solidarieta: ["solidarietà", "solidale", "solidali"],
+    compassione: ["compassione", "compassionevole"],
+  },
+};
+
+function normalizeLemmaKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+}
+
+function tokenizeText(text: string): string[] {
+  return text.match(/\s+|[^\s]+/gu) ?? [];
+}
+
+function heuristicLemma(language: LanguageCode, token: string): string {
+  const normalized = normalizeLemmaKey(token);
+  if (!normalized) return "";
+
+  const suffixRules: Record<LanguageCode, string[]> = {
+    de: ["innen", "ungen", "lich", "isch", "ern", "er", "em", "en", "es", "e", "n", "s"],
+    en: ["ingly", "edly", "ing", "ed", "es", "s"],
+    fr: ["ement", "ements", "ation", "ations", "ement", "e", "es", "s"],
+    it: ["mente", "zioni", "zione", "azioni", "azione", "issimi", "issime", "issimo", "issima", "i", "e", "o", "a"],
+  };
+
+  for (const suffix of suffixRules[language]) {
+    if (normalized.length > suffix.length + 2 && normalized.endsWith(suffix)) {
+      return normalized.slice(0, -suffix.length);
+    }
+  }
+
+  return normalized;
+}
+
+const LANGUAGE_LEMMA_LOOKUP = Object.fromEntries(
+  LANGUAGE_OPTIONS.map(({ code }) => {
+    const lookup: Record<string, string> = {};
+    for (const [lemma, forms] of Object.entries(DEMO_LEMMA_FAMILIES[code])) {
+      const normalizedLemma = normalizeLemmaKey(lemma);
+      lookup[normalizedLemma] = lemma;
+      for (const form of forms) {
+        lookup[normalizeLemmaKey(form)] = lemma;
+      }
+    }
+    return [code, lookup];
+  })
+) as Record<LanguageCode, Record<string, string>>;
+
+const LANGUAGE_LEMMA_SET = Object.fromEntries(
+  LANGUAGE_OPTIONS.map(({ code }) => [
+    code,
+    new Set(
+      Object.keys(DEMO_LEMMA_FAMILIES[code]).map((lemma) => normalizeLemmaKey(lemma))
+    ),
+  ])
+) as Record<LanguageCode, Set<string>>;
+
+function analyzeDimiText(text: string, language: LanguageCode): DimiResult {
+  const segments = tokenizeText(text);
+  const tokens = segments.map((segment) => {
+    const whitespace = /^\s+$/u.test(segment);
+    if (whitespace) {
+      return {
+        segment,
+        normalized: "",
+        lemma: "",
+        matched: false,
+        whitespace: true,
+      };
+    }
+
+    const normalized = normalizeLemmaKey(segment);
+    if (!normalized) {
+      return {
+        segment,
+        normalized: "",
+        lemma: "",
+        matched: false,
+        whitespace: false,
+      };
+    }
+
+    const lookup = LANGUAGE_LEMMA_LOOKUP[language][normalized];
+    const fallbackLemma = heuristicLemma(language, segment);
+    const matchedLemma =
+      lookup ?? (LANGUAGE_LEMMA_SET[language].has(fallbackLemma) ? fallbackLemma : "");
+
+    return {
+      segment,
+      normalized,
+      lemma: matchedLemma || fallbackLemma,
+      matched: Boolean(matchedLemma),
+      whitespace: false,
+    };
+  });
+
+  const matchedTokens = tokens.filter((token) => token.matched).length;
+  const matchedLemmas = [...new Set(tokens.filter((token) => token.matched).map((token) => token.lemma))];
+
+  return {
+    language,
+    tokens,
+    matchedLemmas,
+    matchedTokenCount: matchedTokens,
+    tokenCount: tokens.filter((token) => !token.whitespace).length,
+  };
+}
 
 const parseCsvText = (text: string): string[][] => {
   const rows: string[][] = [];
@@ -107,8 +281,18 @@ const formatJsonPreview = (text: string): string => {
 
 export default function Home() {
   const currentYear = new Date().getFullYear();
+  const [dimiText, setDimiText] = useState(DEFAULT_TEXT);
+  const [dimiLanguage, setDimiLanguage] = useState<LanguageCode>("de");
+  const [dimiResult, setDimiResult] = useState<DimiResult>(() =>
+    analyzeDimiText(DEFAULT_TEXT, "de")
+  );
+  const [dimiError, setDimiError] = useState<string | null>(null);
   const [text, setText] = useState(DEFAULT_TEXT);
-  const [viewMode, setViewMode] = useState<ViewMode>("single");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "single";
+    const stored = sessionStorage.getItem("viewMode") as ViewMode | null;
+    return stored === "single" || stored === "batch" ? stored : "single";
+  });
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
@@ -123,7 +307,6 @@ export default function Home() {
   const [batchMetricsFilename, setBatchMetricsFilename] = useState<
     string | null
   >(null);
-  const [batchJobId, setBatchJobId] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<number>(0);
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
   const [batchTotal, setBatchTotal] = useState<number>(0);
@@ -147,7 +330,6 @@ export default function Home() {
   const clearBatchRunState = () => {
     setBatchStatus("idle");
     setBatchError(null);
-    setBatchJobId(null);
     setBatchProgress(0);
     setBatchProcessed(0);
     setBatchTotal(0);
@@ -179,14 +361,6 @@ export default function Home() {
     batchFile !== null;
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = sessionStorage.getItem("viewMode") as ViewMode | null;
-    if (stored === "single" || stored === "batch") {
-      setViewMode(stored);
-    }
-  }, []);
-
-  useEffect(() => {
     return () => {
       if (batchDownloadUrl) {
         URL.revokeObjectURL(batchDownloadUrl);
@@ -215,7 +389,6 @@ export default function Home() {
       setBatchOutputFormat(null);
       setBatchFilename(null);
       setBatchMetricsFilename(null);
-      setBatchJobId(null);
       setBatchProgress(0);
       setBatchProcessed(0);
       setBatchTotal(0);
@@ -371,6 +544,40 @@ export default function Home() {
     setBatchOutputFormat(nextFormat);
   };
 
+  const handleDimiSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = dimiText.trim();
+    if (!trimmed) {
+      setDimiError("Please enter some text to analyze.");
+      return;
+    }
+
+    setDimiError(null);
+    setDimiResult(analyzeDimiText(trimmed, dimiLanguage));
+  };
+
+  const renderDimiHighlightedText = () => {
+    return dimiResult.tokens.map((token, index) => {
+      if (token.whitespace) {
+        return token.segment;
+      }
+
+      if (token.matched) {
+        return (
+          <mark
+            className={styles.highlightMatch}
+            key={`${token.segment}-${index}`}
+            title={`Lemma: ${token.lemma}`}
+          >
+            {token.segment}
+          </mark>
+        );
+      }
+
+      return <span key={`${token.segment}-${index}`}>{token.segment}</span>;
+    });
+  };
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = text.trim();
@@ -445,7 +652,6 @@ export default function Home() {
       }
 
       const startPayload = (await response.json()) as { job_id: string };
-      setBatchJobId(startPayload.job_id);
       setBatchStatus("processing");
 
       const pollStatus = async () => {
@@ -636,11 +842,76 @@ export default function Home() {
 
         {viewMode === "single" ? (
           <>
-            <section className={styles.batchPanel}>
-              <p className={styles.boxTitle}>Moralization Detection with Dictionary Approach (DiMi)</p>
-              <p>TODO</p>
+          <section className={styles.batchPanel}>
+            <p className={styles.boxTitle}>
+              Moralization Detection with Dictionary Approach (DiMi)
+            </p>
 
+            <section className={styles.panel}>
+              <form className={styles.form} onSubmit={handleDimiSubmit}>
+                <div className={styles.languageSwitch}>
+                  <span className={styles.label}>Language</span>
+
+                  <div className={styles.modeTabs}>
+                    {LANGUAGE_OPTIONS.map((option) => (
+                      <button
+                        key={option.code}
+                        className={`${styles.modeTab} ${
+                          dimiLanguage === option.code
+                            ? styles.modeTabActive
+                            : ""
+                        }`}
+                        type="button"
+                        onClick={() => {
+                          setDimiLanguage(option.code);
+                          setDimiResult(null);
+                        }}
+                        aria-pressed={dimiLanguage === option.code}
+                        title={option.name}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className={styles.label} htmlFor="dimiTextInput">
+                  Text input
+                </label>
+
+                <textarea
+                  id="dimiTextInput"
+                  className={styles.textarea}
+                  value={dimiText}
+                  onChange={(event) => setDimiText(event.target.value)}
+                  rows={7}
+                  maxLength={MAX_TEXT_LENGTH}
+                  placeholder="Paste text to analyze using the DiMi lexicon..."
+                />
+
+                <div className={styles.actions}>
+                  <button
+                    className={styles.primaryButton}
+                    type="submit"
+                  >
+                    Analyze
+                  </button>
+
+                  <span className={styles.hint}>
+                    Dictionary-based lexicon matching ·{" "}
+                    {dimiText.length}/{MAX_TEXT_LENGTH}
+                  </span>
+                </div>
+              </form>
             </section>
+
+            {dimiError && (
+              <p className={styles.errorMessage}>
+                {dimiError}
+              </p>
+            )}
+
+          </section>
 
             <section className={styles.batchPanel}>
               <p className={styles.boxTitle}>Moralization Detection with Language Models</p>
