@@ -290,38 +290,42 @@ def run_batch_job(job: BatchJob) -> None:
     job.status = "running"
     results = []
     predicted_binary: list[int] = []
+    reserved_fields = {"id", "text", "label", "prediction", "confidence"}
+    output_extra_fieldnames = [
+        name for name in job.extra_fieldnames if name not in reserved_fields
+    ]
 
     for index, text in enumerate(job.texts, start=1):
         prediction = MODEL.predict(text)
         predicted_binary.append(label_to_binary(prediction.label))
         confidence_str = f"{prediction.confidence:.4f}"
+        # Start with additional fields, then set canonical output fields so
+        # duplicates are overwritten by the standard output schema.
         result_item: dict[str, object] = {
+            **job.extras[index - 1],
             "id": job.ids[index - 1],
             "text": text,
         }
         if job.labels:
-            result_item["true_label"] = "moralization" if job.labels[index - 1] == 1 else "no_moralization"
-        result_item["label"] = prediction.label
+            result_item["label"] = "moralization" if job.labels[index - 1] == 1 else "no_moralization"
+        result_item["prediction"] = prediction.label
         result_item["confidence"] = confidence_str
-        # Keep all additional fields at the end of each output row.
-        for key, value in job.extras[index - 1].items():
-            result_item[key] = value
         results.append(result_item)
         job.processed = index
 
-    # Ensure true_label is always the normalized string
+    # Ensure label is always the normalized string
     if job.labels:
         for idx, item in enumerate(results):
-            item["true_label"] = "moralization" if job.labels[idx] == 1 else "no_moralization"
+            item["label"] = "moralization" if job.labels[idx] == 1 else "no_moralization"
         job.metrics = compute_metrics(job.labels, predicted_binary)
 
     if job.output_format == "json":
         job.result_json = {"results": results}
     else:
         output = io.StringIO()
-        fieldnames = ["id", "text", "label", "confidence", *job.extra_fieldnames]
+        fieldnames = ["id", "text", "prediction", "confidence", *output_extra_fieldnames]
         if job.labels:
-            fieldnames = ["id", "text", "true_label", "label", "confidence", *job.extra_fieldnames]
+            fieldnames = ["id", "text", "label", "prediction", "confidence", *output_extra_fieldnames]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(results)
