@@ -14,20 +14,17 @@ type ViewMode = "single" | "batch";
 
 type LanguageCode = "de" | "en" | "fr" | "it";
 
-type DimiToken = {
-  segment: string;
-  normalized: string;
-  lemma: string;
-  matched: boolean;
-  whitespace: boolean;
+type LemmaMatchResult = {
+  sentence_index: number;
+  matched_lemmas: string[];
+  context_sentences: string[];
+  context_html: string[];
+  center_sentence: string;
 };
 
-type DimiResult = {
-  language: LanguageCode;
-  tokens: DimiToken[];
-  matchedLemmas: string[];
-  matchedTokenCount: number;
-  tokenCount: number;
+type LemmatizerResponse = {
+  matches: LemmaMatchResult[];
+  total_sentences: number;
 };
 
 
@@ -73,150 +70,6 @@ const LANGUAGE_OPTIONS: Array<{
   { code: "it", label: "IT", name: "Italiano" },
 ];
 
-const DEMO_LEMMA_FAMILIES: Record<LanguageCode, Record<string, string[]>> = {
-  de: {
-    gerecht: ["gerecht", "gerechte", "gerechter", "gerechtes", "gerechtigkeit"],
-    moral: ["moral", "moralisch", "moralische", "moralischen"],
-    verantwortung: ["verantwortung", "verantwortlich", "verantwortliche", "verantwortlichen"],
-    respekt: ["respekt", "respektvoll", "respektvolle", "respektvollen"],
-    solidaritaet: ["solidarität", "solidarisch", "solidarische", "solidarischen"],
-    menschenwuerde: ["menschenwürde", "menschenwuerde"],
-    unfair: ["unfair", "ungerecht", "unmoralisch"],
-  },
-  en: {
-    fairness: ["fair", "fairness", "fairer", "fairest"],
-    moral: ["moral", "morally", "moralistic", "moralize", "moralized"],
-    responsibility: ["responsibility", "responsible", "responsibly"],
-    respect: ["respect", "respectful", "respectfully"],
-    solidarity: ["solidarity", "solidary", "supportive"],
-    dignity: ["dignity", "dignified"],
-    harmful: ["harm", "harmful", "harmfully", "harmfulness"],
-  },
-  fr: {
-    juste: ["juste", "justice", "justement", "justes"],
-    moral: ["moral", "morale", "moralement", "moraux"],
-    responsabilite: ["responsabilité", "responsable", "responsables"],
-    respect: ["respect", "respectueux", "respectueuse"],
-    dignite: ["dignité", "digne", "dignes"],
-    solidarite: ["solidarité", "solidaire", "solidaires"],
-    compassion: ["compassion", "compatissant", "compatissante"],
-  },
-  it: {
-    giusto: ["giusto", "giusta", "giustizia", "giusti", "giuste"],
-    morale: ["morale", "moralmente", "morali"],
-    responsabilita: ["responsabilità", "responsabile", "responsabili"],
-    rispetto: ["rispetto", "rispettoso", "rispettosa"],
-    dignita: ["dignità", "degno", "degna", "degni", "degne"],
-    solidarieta: ["solidarietà", "solidale", "solidali"],
-    compassione: ["compassione", "compassionevole"],
-  },
-};
-
-function normalizeLemmaKey(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-}
-
-function tokenizeText(text: string): string[] {
-  return text.match(/\s+|[^\s]+/gu) ?? [];
-}
-
-function heuristicLemma(language: LanguageCode, token: string): string {
-  const normalized = normalizeLemmaKey(token);
-  if (!normalized) return "";
-
-  const suffixRules: Record<LanguageCode, string[]> = {
-    de: ["innen", "ungen", "lich", "isch", "ern", "er", "em", "en", "es", "e", "n", "s"],
-    en: ["ingly", "edly", "ing", "ed", "es", "s"],
-    fr: ["ement", "ements", "ation", "ations", "ement", "e", "es", "s"],
-    it: ["mente", "zioni", "zione", "azioni", "azione", "issimi", "issime", "issimo", "issima", "i", "e", "o", "a"],
-  };
-
-  for (const suffix of suffixRules[language]) {
-    if (normalized.length > suffix.length + 2 && normalized.endsWith(suffix)) {
-      return normalized.slice(0, -suffix.length);
-    }
-  }
-
-  return normalized;
-}
-
-const LANGUAGE_LEMMA_LOOKUP = Object.fromEntries(
-  LANGUAGE_OPTIONS.map(({ code }) => {
-    const lookup: Record<string, string> = {};
-    for (const [lemma, forms] of Object.entries(DEMO_LEMMA_FAMILIES[code])) {
-      const normalizedLemma = normalizeLemmaKey(lemma);
-      lookup[normalizedLemma] = lemma;
-      for (const form of forms) {
-        lookup[normalizeLemmaKey(form)] = lemma;
-      }
-    }
-    return [code, lookup];
-  })
-) as Record<LanguageCode, Record<string, string>>;
-
-const LANGUAGE_LEMMA_SET = Object.fromEntries(
-  LANGUAGE_OPTIONS.map(({ code }) => [
-    code,
-    new Set(
-      Object.keys(DEMO_LEMMA_FAMILIES[code]).map((lemma) => normalizeLemmaKey(lemma))
-    ),
-  ])
-) as Record<LanguageCode, Set<string>>;
-
-function analyzeDimiText(text: string, language: LanguageCode): DimiResult {
-  const segments = tokenizeText(text);
-  const tokens = segments.map((segment) => {
-    const whitespace = /^\s+$/u.test(segment);
-    if (whitespace) {
-      return {
-        segment,
-        normalized: "",
-        lemma: "",
-        matched: false,
-        whitespace: true,
-      };
-    }
-
-    const normalized = normalizeLemmaKey(segment);
-    if (!normalized) {
-      return {
-        segment,
-        normalized: "",
-        lemma: "",
-        matched: false,
-        whitespace: false,
-      };
-    }
-
-    const lookup = LANGUAGE_LEMMA_LOOKUP[language][normalized];
-    const fallbackLemma = heuristicLemma(language, segment);
-    const matchedLemma =
-      lookup ?? (LANGUAGE_LEMMA_SET[language].has(fallbackLemma) ? fallbackLemma : "");
-
-    return {
-      segment,
-      normalized,
-      lemma: matchedLemma || fallbackLemma,
-      matched: Boolean(matchedLemma),
-      whitespace: false,
-    };
-  });
-
-  const matchedTokens = tokens.filter((token) => token.matched).length;
-  const matchedLemmas = [...new Set(tokens.filter((token) => token.matched).map((token) => token.lemma))];
-
-  return {
-    language,
-    tokens,
-    matchedLemmas,
-    matchedTokenCount: matchedTokens,
-    tokenCount: tokens.filter((token) => !token.whitespace).length,
-  };
-}
 
 const parseCsvText = (text: string): string[][] => {
   const rows: string[][] = [];
@@ -237,14 +90,14 @@ const parseCsvText = (text: string): string[][] => {
       continue;
     }
 
-    if (ch === ',' && !inQuotes) {
+    if (ch === "," && !inQuotes) {
       curRow.push(curCell.trim());
       curCell = "";
       continue;
     }
 
-    if ((ch === '\n' || ch === '\r') && !inQuotes) {
-      if (ch === '\r' && text[i + 1] === '\n') {
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && text[i + 1] === "\n") {
         i += 1;
       }
       curRow.push(curCell.trim());
@@ -257,16 +110,11 @@ const parseCsvText = (text: string): string[][] => {
     curCell += ch;
   }
 
-  // Push any remaining data as the last row
-  if (inQuotes) {
-    // If quotes were not closed, still push what we have to avoid breaking preview
-  }
   if (curCell.length > 0 || curRow.length > 0) {
     curRow.push(curCell.trim());
     rows.push(curRow);
   }
 
-  // Filter out completely empty rows
   return rows.filter((r) => r.some((c) => c.length > 0));
 };
 
@@ -283,10 +131,24 @@ export default function Home() {
   const currentYear = new Date().getFullYear();
   const [dimiText, setDimiText] = useState(DEFAULT_TEXT);
   const [dimiLanguage, setDimiLanguage] = useState<LanguageCode>("de");
-  const [dimiResult, setDimiResult] = useState<DimiResult>(() =>
-    analyzeDimiText(DEFAULT_TEXT, "de")
-  );
+  const [dimiResult, setDimiResult] = useState<LemmatizerResponse | null>(null);
+  const [dimiStatus, setDimiStatus] = useState<"idle" | "loading" | "error">("idle");
   const [dimiError, setDimiError] = useState<string | null>(null);
+  const [lemmaCount, setLemmaCount] = useState<number | null>(null);
+
+  // Fetch lemma count whenever the selected language changes
+  useEffect(() => {
+    setLemmaCount(null);
+    fetch(`http://localhost:8000/lemmas/${dimiLanguage}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Not found");
+        return res.json() as Promise<{ language: string; lemmas: string[] }>;
+      })
+      .then((data) => setLemmaCount(data.lemmas.length))
+      .catch(() => setLemmaCount(null));
+  }, [dimiLanguage]);
+
+  // Single-text moralization state
   const [text, setText] = useState(DEFAULT_TEXT);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window === "undefined") return "single";
@@ -296,26 +158,22 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
+
+  // Batch state
   const [batchFile, setBatchFile] = useState<File | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatus>("idle");
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
-  const [batchOutputFormat, setBatchOutputFormat] = useState<
-    "csv" | "json" | null
-  >(null);
+  const [batchOutputFormat, setBatchOutputFormat] = useState<"csv" | "json" | null>(null);
   const [batchFilename, setBatchFilename] = useState<string | null>(null);
-  const [batchMetricsFilename, setBatchMetricsFilename] = useState<
-    string | null
-  >(null);
+  const [batchMetricsFilename, setBatchMetricsFilename] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<number>(0);
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
   const [batchTotal, setBatchTotal] = useState<number>(0);
   const [inputPreview, setInputPreview] = useState<string[][]>([]);
   const [inputPreviewJson, setInputPreviewJson] = useState<string | null>(null);
   const [outputPreview, setOutputPreview] = useState<string[][]>([]);
-  const [outputPreviewJson, setOutputPreviewJson] = useState<string | null>(
-    null
-  );
+  const [outputPreviewJson, setOutputPreviewJson] = useState<string | null>(null);
   const [batchMetrics, setBatchMetrics] = useState<BatchMetrics | null>(null);
   const [inputPreviewNote, setInputPreviewNote] = useState<string | null>(
     "Upload a CSV or JSON file to see a preview."
@@ -323,9 +181,7 @@ export default function Home() {
   const [outputPreviewNote, setOutputPreviewNote] = useState<string | null>(
     "Run a batch request to see the output preview."
   );
-  const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(
-    null
-  );
+  const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
 
   const clearBatchRunState = () => {
     setBatchStatus("idle");
@@ -357,8 +213,8 @@ export default function Home() {
     if (!result) return "--";
     return `${(result.confidence * 100).toFixed(2)}%`;
   }, [result]);
-  const hasUnsavedData =
-    batchFile !== null;
+
+  const hasUnsavedData = batchFile !== null;
 
   useEffect(() => {
     return () => {
@@ -368,53 +224,121 @@ export default function Home() {
     };
   }, [batchDownloadUrl]);
 
-  const resetAppState = () => {
-      const ok = window.confirm(
-          "Reset the app?\nThis will clear your current progress and cannot be undone!"
-        );
-
-        if (!ok) return;
-      
-      sessionStorage.setItem("viewMode", "single");
-
-      setText(INITIAL_TEXT);
-      setStatus("idle");
-      setErrorMessage(null);
-      setResult(null);
-
-      setBatchFile(null);
-      setBatchStatus("idle");
-      setBatchError(null);
-      setBatchDownloadUrl(null);
-      setBatchOutputFormat(null);
-      setBatchFilename(null);
-      setBatchMetricsFilename(null);
-      setBatchProgress(0);
-      setBatchProcessed(0);
-      setBatchTotal(0);
-
-      setInputPreview([]);
-      setOutputPreview([]);
-      setOutputPreviewJson(null);
-      setBatchMetrics(null);
-
-      setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
-      setOutputPreviewNote("Run a batch request to see the output preview.");
-    };
-  
-  
   useEffect(() => {
-  const handler = (event: BeforeUnloadEvent) => {
+    const handler = (event: BeforeUnloadEvent) => {
       if (!hasUnsavedData) return;
-
       event.preventDefault();
       event.returnValue = "";
     };
-
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedData]);
-    
+
+  const resetAppState = () => {
+    const ok = window.confirm(
+      "Reset the app?\nThis will clear your current progress and cannot be undone!"
+    );
+    if (!ok) return;
+
+    sessionStorage.setItem("viewMode", "single");
+    setText(INITIAL_TEXT);
+    setStatus("idle");
+    setErrorMessage(null);
+    setResult(null);
+
+    setBatchFile(null);
+    setBatchStatus("idle");
+    setBatchError(null);
+    setBatchDownloadUrl(null);
+    setBatchOutputFormat(null);
+    setBatchFilename(null);
+    setBatchMetricsFilename(null);
+    setBatchProgress(0);
+    setBatchProcessed(0);
+    setBatchTotal(0);
+    setInputPreview([]);
+    setOutputPreview([]);
+    setOutputPreviewJson(null);
+    setBatchMetrics(null);
+    setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
+    setOutputPreviewNote("Run a batch request to see the output preview.");
+  };
+
+
+  const handleDimiSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = dimiText.trim();
+    if (!trimmed) {
+      setDimiError("Please enter some text to analyze.");
+      return;
+    }
+
+    setDimiError(null);
+    setDimiStatus("loading");
+    setDimiResult(null);
+
+    try {
+      const response = await fetch("http://localhost:8000/lemmatize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: trimmed,
+          language: dimiLanguage,
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Lemmatizer request failed");
+      }
+
+      const data = (await response.json()) as LemmatizerResponse;
+      setDimiResult(data);
+      setDimiStatus("idle");
+    } catch (error) {
+      setDimiStatus("error");
+      setDimiError(error instanceof Error ? error.message : "Unexpected error");
+    }
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (trimmed.length > MAX_TEXT_LENGTH) {
+      setStatus("error");
+      setErrorMessage(
+        `Input is too long (${trimmed.length} chars). Maximum allowed is ${MAX_TEXT_LENGTH}.`
+      );
+      return;
+    }
+
+    setStatus("loading");
+    setErrorMessage(null);
+    setResult(null);
+
+    try {
+      const response = await fetch("http://localhost:8000/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: trimmed }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Request failed");
+      }
+
+      const data = (await response.json()) as PredictionResponse;
+      setResult(data);
+      setStatus("idle");
+    } catch (error) {
+      setStatus("error");
+      setErrorMessage(error instanceof Error ? error.message : "Unexpected error");
+    }
+  };
+
+
   const handleBatchFileChange = async (file: File | null) => {
     const hasDownstreamState =
       batchOutputFormat !== null ||
@@ -467,8 +391,8 @@ export default function Home() {
         const jsonInstanceCount = Array.isArray(parsedJson)
           ? parsedJson.length
           : parsedJson && typeof parsedJson === "object"
-            ? 1
-            : 0;
+          ? 1
+          : 0;
 
         if (jsonInstanceCount > MAX_BATCH_INSTANCES) {
           setBatchFile(null);
@@ -488,6 +412,7 @@ export default function Home() {
         setInputPreviewNote(`Instances detected: ${jsonInstanceCount}`);
         return;
       }
+
       const allRows = parseCsvAll(textContent);
       if (allRows.length === 0) {
         setInputPreviewNote("No rows detected in the CSV file.");
@@ -520,10 +445,9 @@ export default function Home() {
     }
   };
 
-  const handleBatchOutputFormatChange = (value: string) => {
-    const nextFormat =
-      value === "json" ? "json" : value === "csv" ? "csv" : null;
 
+  const handleBatchOutputFormatChange = (value: string) => {
+    const nextFormat = value === "json" ? "json" : value === "csv" ? "csv" : null;
     if (nextFormat === batchOutputFormat) return;
 
     const hasDownstreamState =
@@ -544,82 +468,7 @@ export default function Home() {
     setBatchOutputFormat(nextFormat);
   };
 
-  const handleDimiSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = dimiText.trim();
-    if (!trimmed) {
-      setDimiError("Please enter some text to analyze.");
-      return;
-    }
-
-    setDimiError(null);
-    setDimiResult(analyzeDimiText(trimmed, dimiLanguage));
-  };
-
-  const renderDimiHighlightedText = () => {
-    return dimiResult.tokens.map((token, index) => {
-      if (token.whitespace) {
-        return token.segment;
-      }
-
-      if (token.matched) {
-        return (
-          <mark
-            className={styles.highlightMatch}
-            key={`${token.segment}-${index}`}
-            title={`Lemma: ${token.lemma}`}
-          >
-            {token.segment}
-          </mark>
-        );
-      }
-
-      return <span key={`${token.segment}-${index}`}>{token.segment}</span>;
-    });
-  };
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    if (trimmed.length > MAX_TEXT_LENGTH) {
-      setStatus("error");
-      setErrorMessage(
-        `Input is too long (${trimmed.length} chars). Maximum allowed is ${MAX_TEXT_LENGTH}.`
-      );
-      return;
-    }
-
-    setStatus("loading");
-    setErrorMessage(null);
-    setResult(null);
-
-    try {
-      const response = await fetch("http://localhost:8000/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: trimmed }),
-      });
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "Request failed");
-      }
-
-      const data = (await response.json()) as PredictionResponse;
-      setResult(data);
-      setStatus("idle");
-    } catch (error) {
-      setStatus("error");
-      setErrorMessage(
-        error instanceof Error ? error.message : "Unexpected error"
-      );
-    }
-  };
-
-  const handleBatchSubmit = async (
-    event: React.FormEvent<HTMLFormElement>
-  ) => {
+  const handleBatchSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!batchFile || !batchOutputFormat) return;
 
@@ -667,9 +516,7 @@ export default function Home() {
         setBatchProgress(statusPayload.progress);
         setBatchProcessed(statusPayload.processed);
         setBatchTotal(statusPayload.total);
-        if (statusPayload.metrics) {
-          setBatchMetrics(statusPayload.metrics);
-        }
+        if (statusPayload.metrics) setBatchMetrics(statusPayload.metrics);
 
         if (statusPayload.status === "completed") {
           const resultResponse = await fetch(
@@ -680,13 +527,12 @@ export default function Home() {
             throw new Error(message || "Result request failed");
           }
 
-          const baseName =
-            batchFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
+          const baseName = batchFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
           const extension = batchOutputFormat === "json" ? "json" : "csv";
           if (statusPayload.metrics) {
-            const metricsExtension =
-              batchOutputFormat === "json" ? "json" : "csv";
-            setBatchMetricsFilename(`${baseName}-metrics.${metricsExtension}`);
+            setBatchMetricsFilename(
+              `${baseName}-metrics.${batchOutputFormat === "json" ? "json" : "csv"}`
+            );
           }
 
           if (batchOutputFormat === "json") {
@@ -695,13 +541,9 @@ export default function Home() {
             setOutputPreview([]);
             setOutputPreviewJson(prettyJson);
             setOutputPreviewNote(null);
-
-            const blob = new Blob([prettyJson], {
-              type: "application/json",
-            });
-            const downloadUrl = URL.createObjectURL(blob);
+            const blob = new Blob([prettyJson], { type: "application/json" });
             setBatchFilename(`${baseName}-results.${extension}`);
-            setBatchDownloadUrl(downloadUrl);
+            setBatchDownloadUrl(URL.createObjectURL(blob));
             setBatchStatus("done");
             return true;
           }
@@ -709,15 +551,11 @@ export default function Home() {
           const csvText = await resultResponse.text();
           const preview = parseCsvAll(csvText);
           setOutputPreview(preview);
-          setOutputPreviewNote(
-            preview.length ? null : "No rows detected in the CSV output."
-          );
+          setOutputPreviewNote(preview.length ? null : "No rows detected in the CSV output.");
           setOutputPreviewJson(null);
-
           const blob = new Blob([csvText], { type: "text/csv" });
-          const downloadUrl = URL.createObjectURL(blob);
           setBatchFilename(`${baseName}-results.${extension}`);
-          setBatchDownloadUrl(downloadUrl);
+          setBatchDownloadUrl(URL.createObjectURL(blob));
           setBatchStatus("done");
           return true;
         }
@@ -733,18 +571,14 @@ export default function Home() {
         let completed = false;
         while (!completed) {
           completed = await pollStatus();
-          if (!completed) {
-            await new Promise((resolve) => setTimeout(resolve, 600));
-          }
+          if (!completed) await new Promise((resolve) => setTimeout(resolve, 600));
         }
       };
 
       await pollLoop();
     } catch (error) {
       setBatchStatus("error");
-      setBatchError(
-        error instanceof Error ? error.message : "Unexpected error"
-      );
+      setBatchError(error instanceof Error ? error.message : "Unexpected error");
     }
   };
 
@@ -776,8 +610,7 @@ export default function Home() {
     const link = document.createElement("a");
     link.href = metricsUrl;
     link.download =
-      batchMetricsFilename ??
-      `metrics.${batchOutputFormat === "json" ? "json" : "csv"}`;
+      batchMetricsFilename ?? `metrics.${batchOutputFormat === "json" ? "json" : "csv"}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -786,11 +619,67 @@ export default function Home() {
 
   const truncateCell = (value: string | undefined | null, limit = 120) => {
     if (!value) return "";
-    // collapse whitespace and newlines for preview
     const collapsed = value.replace(/\s+/g, " ").trim();
     if (collapsed.length <= limit) return collapsed;
     return collapsed.slice(0, limit) + "…";
   };
+
+  const renderDimiResults = () => {
+    if (!dimiResult) return null;
+
+    if (dimiResult.matches.length === 0) {
+      return (
+        <p className={styles.previewEmpty}>
+          No dictionary lemmas found in the text ({dimiResult.total_sentences} sentence
+          {dimiResult.total_sentences !== 1 ? "s" : ""} analyzed).
+        </p>
+      );
+    }
+
+    return (
+      <div className={styles.dimiResults}>
+        <p className={styles.hint}>
+          {dimiResult.matches.length} match
+          {dimiResult.matches.length !== 1 ? "es" : ""} across{" "}
+          {dimiResult.total_sentences} sentence
+          {dimiResult.total_sentences !== 1 ? "s" : ""}
+        </p>
+
+        {dimiResult.matches.map((match, i) => (
+          <div key={i} className={styles.dimiMatchCard}>
+            <p className={styles.dimiMatchMeta}>
+              Sentence {match.sentence_index + 1} ·{" "}
+              <span className={styles.dimiLemmaList}>
+                {match.matched_lemmas.join(", ")}
+              </span>
+            </p>
+
+            <div className={styles.dimiContext}>
+              {match.context_html.map((sentence, j) => {
+                // The center sentence (matched one) has <mark> tags from the backend.
+                // We use dangerouslySetInnerHTML only for that sentence; the rest are plain text.
+                const isCenterSentence =
+                  match.context_sentences[j] === match.center_sentence;
+
+                return isCenterSentence ? (
+                  <span
+                    key={j}
+                    className={styles.dimiCenterSentence}
+                    dangerouslySetInnerHTML={{ __html: sentence }}
+                  />
+                ) : (
+                  <span key={j} className={styles.dimiContextSentence}>
+                    {sentence}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
 
   return (
     <div className={styles.page}>
@@ -806,9 +695,7 @@ export default function Home() {
         <section className={styles.modeSwitch}>
           <div className={styles.modeTabs}>
             <button
-              className={`${styles.modeTab} ${
-                viewMode === "single" ? styles.modeTabActive : ""
-              }`}
+              className={`${styles.modeTab} ${viewMode === "single" ? styles.modeTabActive : ""}`}
               type="button"
               onClick={() => {
                 setViewMode("single");
@@ -817,11 +704,8 @@ export default function Home() {
             >
               Single text
             </button>
-
             <button
-              className={`${styles.modeTab} ${
-                viewMode === "batch" ? styles.modeTabActive : ""
-              }`}
+              className={`${styles.modeTab} ${viewMode === "batch" ? styles.modeTabActive : ""}`}
               type="button"
               onClick={() => {
                 setViewMode("batch");
@@ -832,6 +716,7 @@ export default function Home() {
             </button>
           </div>
         </section>
+
         <section>
           <p className={styles.modeHint}>
             {viewMode === "single"
@@ -842,79 +727,80 @@ export default function Home() {
 
         {viewMode === "single" ? (
           <>
-          <section className={styles.batchPanel}>
-            <p className={styles.boxTitle}>
-              Moralization Detection with Dictionary Approach (DiMi)
-            </p>
+            {/* ── DiMi panel ── */}
+            <section className={styles.batchPanel}>
+              <p className={styles.boxTitle}>
+                Moralization Detection with Dictionary Approach (DiMi)
+              </p>
 
-            <section className={styles.panel}>
-              <form className={styles.form} onSubmit={handleDimiSubmit}>
-                <div className={styles.languageSwitch}>
-                  <span className={styles.label}>Language</span>
-
-                  <div className={styles.modeTabs}>
-                    {LANGUAGE_OPTIONS.map((option) => (
-                      <button
-                        key={option.code}
-                        className={`${styles.modeTab} ${
-                          dimiLanguage === option.code
-                            ? styles.modeTabActive
-                            : ""
-                        }`}
-                        type="button"
-                        onClick={() => {
-                          setDimiLanguage(option.code);
-                          setDimiResult(null);
-                        }}
-                        aria-pressed={dimiLanguage === option.code}
-                        title={option.name}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+              <section className={styles.panel}>
+                <form className={styles.form} onSubmit={handleDimiSubmit}>
+                  <div className={styles.languageSwitch}>
+                    <span className={styles.label}>Language</span>
+                    <div className={styles.modeTabs}>
+                      {LANGUAGE_OPTIONS.map((option) => (
+                        <button
+                          key={option.code}
+                          className={`${styles.modeTab} ${
+                            dimiLanguage === option.code ? styles.modeTabActive : ""
+                          }`}
+                          type="button"
+                          onClick={() => {
+                            setDimiLanguage(option.code);
+                            setDimiResult(null);
+                          }}
+                          aria-pressed={dimiLanguage === option.code}
+                          title={option.name}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                  <a className={styles.hint}>
+                    {lemmaCount !== null ? `${lemmaCount} lemmas in ${dimiLanguage.toUpperCase()} DiMi` : "loading lemmas…"}
+                  </a>
 
-                <label className={styles.label} htmlFor="dimiTextInput">
-                  Text input
-                </label>
+                  <label className={styles.label} htmlFor="dimiTextInput">
+                    Text input
+                  </label>
+                  <textarea
+                    id="dimiTextInput"
+                    className={styles.textarea}
+                    value={dimiText}
+                    onChange={(event) => setDimiText(event.target.value)}
+                    rows={7}
+                    maxLength={MAX_TEXT_LENGTH}
+                    placeholder="Paste text to analyze using the DiMi lexicon..."
+                  />
 
-                <textarea
-                  id="dimiTextInput"
-                  className={styles.textarea}
-                  value={dimiText}
-                  onChange={(event) => setDimiText(event.target.value)}
-                  rows={7}
-                  maxLength={MAX_TEXT_LENGTH}
-                  placeholder="Paste text to analyze using the DiMi lexicon..."
-                />
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.primaryButton}
+                      type="submit"
+                      disabled={dimiStatus === "loading"}
+                    >
+                      {dimiStatus === "loading" ? "Analyzing..." : "Analyze"}
+                    </button>
+                    <span className={styles.hint}>
+                      {dimiText.length}/{MAX_TEXT_LENGTH}
+                    </span>
+                  </div>
+                </form>
+              </section>
 
-                <div className={styles.actions}>
-                  <button
-                    className={styles.primaryButton}
-                    type="submit"
-                  >
-                    Analyze
-                  </button>
+              {dimiStatus === "error" && dimiError && (
+                <p className={styles.errorMessage}>{dimiError}</p>
+              )}
 
-                  <span className={styles.hint}>
-                    Dictionary-based lexicon matching ·{" "}
-                    {dimiText.length}/{MAX_TEXT_LENGTH}
-                  </span>
-                </div>
-              </form>
+              {dimiResult && renderDimiResults()}
             </section>
 
-            {dimiError && (
-              <p className={styles.errorMessage}>
-                {dimiError}
-              </p>
-            )}
-
-          </section>
-
+            {/* ── LM panel ── */}
             <section className={styles.batchPanel}>
-              <p className={styles.boxTitle}>Moralization Detection with Language Models</p>
+              <p className={styles.boxTitle}>
+                Moralization Detection with Language Models
+              </p>
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleSubmit}>
                   <label className={styles.label} htmlFor="textInputSecondary">
@@ -929,7 +815,6 @@ export default function Home() {
                     maxLength={MAX_TEXT_LENGTH}
                     placeholder="Paste text to analyze for moralization..."
                   />
-
                   <div className={styles.actions}>
                     <button
                       className={styles.primaryButton}
@@ -949,9 +834,7 @@ export default function Home() {
                 <section className={styles.resultCard}>
                   <div>
                     <p className={styles.resultLabel}>Prediction</p>
-                    <p className={styles.resultValue}>
-                      {result.label.replace("_", " ")}
-                    </p>
+                    <p className={styles.resultValue}>{result.label.replace("_", " ")}</p>
                   </div>
                   <div>
                     <p className={styles.resultLabel}>Confidence</p>
@@ -966,14 +849,19 @@ export default function Home() {
             </section>
           </>
         ) : (
+          /* ── Batch panel ── */
           <section className={styles.batchPanel}>
-
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
-              <p className={styles.boxTitle}>Pipeline Moralization Detection (DiMi + Language Models)</p>
+              <p className={styles.boxTitle}>
+                Pipeline Moralization Detection (DiMi + Language Models)
+              </p>
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
                 <div className={styles.formatList}>
-                  <p><b>Optional columns:</b> id and label (moralization/no_moralization, true/false, 0/1).</p>
+                  <p>
+                    <b>Optional columns:</b> id and label (moralization/no_moralization,
+                    true/false, 0/1).
+                  </p>
                   <p>If <b>no ids</b> are provided, ids are auto-generated.</p>
                   <p>If <b>no labels</b> are provided, metrics are not calculated.</p>
                 </div>
@@ -1020,7 +908,7 @@ export default function Home() {
                     <div className={styles.previewScroll}>
                       <table className={`${styles.previewTable} ${styles.previewJsonLight}`}>
                         <tbody>
-                            {inputPreview.map((row, i) => (
+                          {inputPreview.map((row, i) => (
                             <tr key={i}>
                               {row.map((cell, j) => (
                                 <td key={j}>
@@ -1049,7 +937,9 @@ export default function Home() {
                     id="outputFormat"
                     className={`${styles.select} ${styles.primarySelect}`}
                     value={batchOutputFormat ?? ""}
-                    onChange={(event) => handleBatchOutputFormatChange(event.target.value)}
+                    onChange={(event) =>
+                      handleBatchOutputFormatChange(event.target.value)
+                    }
                     required
                   >
                     <option value="" disabled>
@@ -1062,7 +952,9 @@ export default function Home() {
               )}
 
               {batchFile && batchOutputFormat && (
-                <div className={`${styles.batchActions} ${styles.sectionBox} ${styles.fadeInSection}`}>
+                <div
+                  className={`${styles.batchActions} ${styles.sectionBox} ${styles.fadeInSection}`}
+                >
                   <div className={styles.progressWrap}>
                     <button
                       className={styles.primaryButton}
@@ -1098,8 +990,12 @@ export default function Home() {
             )}
 
             <div className={styles.previewGrid}>
-              {(batchStatus === "done" || outputPreviewJson || outputPreview.length > 0) && (
-                <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
+              {(batchStatus === "done" ||
+                outputPreviewJson ||
+                outputPreview.length > 0) && (
+                <div
+                  className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}
+                >
                   <p className={styles.previewTitle}>
                     Output preview ({(batchOutputFormat ?? "csv").toUpperCase()})
                   </p>
@@ -1112,7 +1008,10 @@ export default function Home() {
                               <tr key={i}>
                                 {row.map((cell, j) => (
                                   <td key={j}>
-                                    <div className={styles.cellTruncate} title={String(cell)}>
+                                    <div
+                                      className={styles.cellTruncate}
+                                      title={String(cell)}
+                                    >
                                       {truncateCell(String(cell))}
                                     </div>
                                   </td>
@@ -1134,20 +1033,17 @@ export default function Home() {
                   )}
                 </div>
               )}
+
               {batchMetrics && (
                 <div className={`${styles.resultCard} ${styles.metricsCard}`}>
                   <span className={styles.metricsTitle}>Metrics</span>
                   <div>
                     <p className={styles.resultLabel}>Accuracy</p>
-                    <p className={styles.resultValue}>
-                      {batchMetrics.accuracy}
-                    </p>
+                    <p className={styles.resultValue}>{batchMetrics.accuracy}</p>
                   </div>
                   <div>
                     <p className={styles.resultLabel}>Precision</p>
-                    <p className={styles.resultValue}>
-                      {batchMetrics.precision}
-                    </p>
+                    <p className={styles.resultValue}>{batchMetrics.precision}</p>
                   </div>
                   <div>
                     <p className={styles.resultLabel}>Recall</p>
@@ -1201,6 +1097,7 @@ export default function Home() {
                 </div>
               </div>
             )}
+
             {(batchDownloadUrl || batchMetrics) && (
               <div className={`${styles.downloadSection} ${styles.fadeInSection}`}>
                 <div className={styles.downloadLinks}>
@@ -1218,23 +1115,30 @@ export default function Home() {
             )}
           </section>
         )}
-      <footer className={styles.footer}>
-        <div className={styles.footerRow}>
-          <span>
-            © {currentYear} CHAI Lab - Department of German Language and Literature, University Heidelberg. All rights reserved.
-          </span>
-        </div>
 
-        <div className={styles.footerRow}>
-          <a className={styles.footerLink} href="https://www.uni-heidelberg.de/en/imprint">
-            Imprint / Impressum
-          </a>
-          <span className={styles.footerDivider}> | </span>
-          <a className={styles.footerLink} href="https://www.uni-heidelberg.de/en/privacy-statement">
-            Privacy Statement / Datenschutzerklärung
-          </a>
-        </div>
-      </footer>
+        <footer className={styles.footer}>
+          <div className={styles.footerRow}>
+            <span>
+              © {currentYear} CHAI Lab - Department of German Language and Literature,
+              University Heidelberg. All rights reserved.
+            </span>
+          </div>
+          <div className={styles.footerRow}>
+            <a
+              className={styles.footerLink}
+              href="https://www.uni-heidelberg.de/en/imprint"
+            >
+              Imprint / Impressum
+            </a>
+            <span className={styles.footerDivider}> | </span>
+            <a
+              className={styles.footerLink}
+              href="https://www.uni-heidelberg.de/en/privacy-statement"
+            >
+              Privacy Statement / Datenschutzerklärung
+            </a>
+          </div>
+        </footer>
       </main>
     </div>
   );

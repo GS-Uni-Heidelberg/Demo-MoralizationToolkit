@@ -4,10 +4,14 @@ import csv
 import io
 import json
 import os
+import re
 import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+import openpyxl
+import stanza
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +27,8 @@ DEFAULT_MODEL_DIR = (
     / "checkpoint-1473"
 )
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", DEFAULT_MODEL_DIR))
+
+LEMMAS_DIR = Path(os.environ.get("LEMMAS_DIR", ROOT_DIR / "models" / "dimi"))
 
 app = FastAPI(title="Moralization Detection API")
 
@@ -45,6 +51,9 @@ app.add_middleware(
 )
 
 
+# ── MORALIZATION MODELS ───────────────────────────────────────────────────────
+
+
 class PredictRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)
 
@@ -52,6 +61,27 @@ class PredictRequest(BaseModel):
 class PredictResponse(BaseModel):
     label: str
     confidence: float
+
+
+# ── LEMMATIZER MODELS ─────────────────────────────────────────────────────────
+
+
+class LemmatizerRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=50_000)
+    language: str = Field(..., description="ISO 639-1 code, e.g. 'en', 'de'")
+
+
+class LemmatizerResponse(BaseModel):
+    matches: list[dict]
+    total_sentences: int
+
+
+class LemmaBatchRequest(BaseModel):
+    texts: list[str] = Field(..., min_items=1, max_items=1000)
+    language: str = Field(..., description="ISO 639-1 code, e.g. 'en', 'de'")
+
+
+# ── BATCH JOB ─────────────────────────────────────────────────────────────────
 
 
 class BatchJob:
@@ -85,6 +115,9 @@ JOBS: dict[str, BatchJob] = {}
 JOB_LOCK = threading.Lock()
 
 
+# ── MORALIZATION MODEL BUNDLE ─────────────────────────────────────────────────
+
+
 class ModelBundle:
     def __init__(self, model_dir: Path) -> None:
         if not model_dir.exists():
@@ -114,6 +147,215 @@ class ModelBundle:
         confidence = round(float(probs[best_idx].item()), 4)
 
         return PredictResponse(label=label, confidence=confidence)
+
+
+# ── LEMMA LOADER ──────────────────────────────────────────────────────────────
+
+
+def load_lemmas(language: str) -> list[str]:
+    """
+    Read lemmas from the dimi directory.
+    Handles both naming conventions present on disk:
+      - Moralization-Dictionary_DE-lemmatized.xlsx  (hyphen before 'lemmatized')
+      - Moralization-Dictionary_EN_lemmatized.xlsx  (underscore before 'lemmatized')
+    """
+    lang = language.upper()
+    candidates = [
+        LEMMAS_DIR / f"Moralization-Dictionary_{lang}-lemmatized.xlsx",
+        LEMMAS_DIR / f"Moralization-Dictionary_{lang}_lemmatized.xlsx",
+    ]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        raise FileNotFoundError(
+            f"No lemma file found for language '{language}'. "
+            f"Tried: {', '.join(str(p) for p in candidates)}"
+        )
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+
+    seen: set[str] = set()
+    lemmas: list[str] = []
+    for row in ws.iter_rows(min_col=1, max_col=1, values_only=True):
+        cell = row[0]
+        if cell is None:
+            continue
+        value = str(cell).strip().lower()
+        if value and value not in seen:
+            seen.add(value)
+            lemmas.append(value)
+
+    wb.close()
+    return lemmas
+
+
+# ── LEMMA CACHE (loaded once at startup per language file found) ───────────────
+
+def _preload_lemmas() -> dict[str, list[str]]:
+    cache: dict[str, list[str]] = {}
+    for lang in ("de", "en", "fr", "it"):
+        try:
+            cache[lang] = load_lemmas(lang)
+        except FileNotFoundError as exc:
+            print(f"[lemmas] {exc}")
+        except Exception as exc:
+            print(f"[lemmas] Could not load '{lang}': {exc}")
+    return cache
+
+
+LEMMA_CACHE: dict[str, list[str]] = _preload_lemmas()
+
+
+
+
+
+@dataclass
+class LemmaMatch:
+    sentence_index: int
+    matched_lemmas: list[str]
+    context_sentences: list[str]
+    context_html: list[str]
+    center_sentence: str
+
+
+class LemmatizerBundle:
+    """
+    Maintains one stanza.Pipeline per language, created lazily on first use.
+    Uses package='default' (smallest available model) for every language.
+    Stanza pipelines are not thread-safe; a single lock serialises all access.
+    For higher concurrency, replace with a per-language lock dict.
+    """
+
+    def __init__(self) -> None:
+        self._pipelines: dict[str, stanza.Pipeline] = {}
+        self._lock = threading.Lock()
+        for lang in LEMMA_CACHE:
+            try:
+                self._get_pipeline(lang)
+                print(f"[stanza] Loaded pipeline for '{lang}'")
+            except Exception as exc:
+                print(f"[stanza] Could not load pipeline for '{lang}': {exc}")
+
+    # ── private ────────────────────────────────────────────────────────────
+
+    def _get_pipeline(self, language: str) -> stanza.Pipeline:
+        """Return cached pipeline, downloading + building it on first use."""
+        if language not in self._pipelines:
+            stanza.download(
+                language,
+                package="default",
+                processors="tokenize,pos,lemma",
+                logging_level="WARN",
+            )
+            self._pipelines[language] = stanza.Pipeline(
+                language,
+                package="default",
+                processors="tokenize,pos,lemma",
+                logging_level="WARN",
+            )
+        return self._pipelines[language]
+
+    @staticmethod
+    def _mark_tokens(sentence_text: str, surface_forms: set[str]) -> str:
+        """Wrap matched surface forms in <mark> tags (case-insensitive)."""
+        if not surface_forms:
+            return sentence_text
+        pattern = re.compile(
+            r"\b("
+            + "|".join(re.escape(f) for f in sorted(surface_forms, key=len, reverse=True))
+            + r")\b",
+            flags=re.IGNORECASE,
+        )
+        return pattern.sub(r"<mark>\1</mark>", sentence_text)
+
+    # ── public ─────────────────────────────────────────────────────────────
+
+    def find_lemmas(
+        self,
+        text: str,
+        language: str,
+    ) -> LemmatizerResponse:
+        """
+        Lemmatise *text* and return every sentence whose tokens include a lemma
+        from the pre-loaded dictionary for *language*, together with ±2 sentences
+        of context.
+
+        Parameters
+        ----------
+        text:
+            Raw input text.
+        language:
+            ISO 639-1 code (e.g. ``"de"``, ``"en"``). A lemma file for this
+            language must exist in ``LEMMAS_DIR``.
+        """
+        if language not in LEMMA_CACHE:
+            raise ValueError(
+                f"No lemma file found for language '{language}'. "
+                f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
+            )
+        dict_set = set(LEMMA_CACHE[language])  # already lowercased
+
+        with self._lock:
+            pipeline = self._get_pipeline(language)
+            doc = pipeline(text)
+
+        sentences = doc.sentences
+        total = len(sentences)
+        matches: list[LemmaMatch] = []
+
+        for sent_idx, sentence in enumerate(sentences):
+            matched_lemmas: set[str] = set()
+            matched_surface: set[str] = set()
+
+            for token in sentence.tokens:
+                for word in token.words:
+                    if word.lemma and word.lemma.lower() in dict_set:
+                        matched_lemmas.add(word.lemma.lower())
+                        matched_surface.add(word.text)
+
+            if not matched_lemmas:
+                continue
+
+            window_start = max(0, sent_idx - 2)
+            window_end = min(total, sent_idx + 3)  # exclusive
+            context_plain: list[str] = []
+            context_html: list[str] = []
+
+            for ctx_idx in range(window_start, window_end):
+                ctx_text = sentences[ctx_idx].text
+                context_plain.append(ctx_text)
+                context_html.append(
+                    self._mark_tokens(ctx_text, matched_surface)
+                    if ctx_idx == sent_idx
+                    else ctx_text
+                )
+
+            matches.append(
+                LemmaMatch(
+                    sentence_index=sent_idx,
+                    matched_lemmas=sorted(matched_lemmas),
+                    context_sentences=context_plain,
+                    context_html=context_html,
+                    center_sentence=sentence.text,
+                )
+            )
+
+        return LemmatizerResponse(
+            matches=[
+                {
+                    "sentence_index": m.sentence_index,
+                    "matched_lemmas": m.matched_lemmas,
+                    "context_sentences": m.context_sentences,
+                    "context_html": m.context_html,
+                    "center_sentence": m.center_sentence,
+                }
+                for m in matches
+            ],
+            total_sentences=total,
+        )
+
+
+# ── HELPERS ───────────────────────────────────────────────────────────────────
 
 
 def parse_label(value: object) -> int:
@@ -195,7 +437,6 @@ def parse_csv_texts(
         if text:
             texts.append(text)
     ids = [str(index) for index in range(1, len(texts) + 1)]
-
     extras = [{} for _ in texts]
     return texts, None, ids, extras, []
 
@@ -299,21 +540,20 @@ def run_batch_job(job: BatchJob) -> None:
         prediction = MODEL.predict(text)
         predicted_binary.append(label_to_binary(prediction.label))
         confidence_str = f"{prediction.confidence:.4f}"
-        # Start with additional fields, then set canonical output fields so
-        # duplicates are overwritten by the standard output schema.
         result_item: dict[str, object] = {
             **job.extras[index - 1],
             "id": job.ids[index - 1],
             "text": text,
         }
         if job.labels:
-            result_item["label"] = "moralization" if job.labels[index - 1] == 1 else "no_moralization"
+            result_item["label"] = (
+                "moralization" if job.labels[index - 1] == 1 else "no_moralization"
+            )
         result_item["prediction"] = prediction.label
         result_item["confidence"] = confidence_str
         results.append(result_item)
         job.processed = index
 
-    # Ensure label is always the normalized string
     if job.labels:
         for idx, item in enumerate(results):
             item["label"] = "moralization" if job.labels[idx] == 1 else "no_moralization"
@@ -325,7 +565,14 @@ def run_batch_job(job: BatchJob) -> None:
         output = io.StringIO()
         fieldnames = ["id", "text", "prediction", "confidence", *output_extra_fieldnames]
         if job.labels:
-            fieldnames = ["id", "text", "label", "prediction", "confidence", *output_extra_fieldnames]
+            fieldnames = [
+                "id",
+                "text",
+                "label",
+                "prediction",
+                "confidence",
+                *output_extra_fieldnames,
+            ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(results)
@@ -334,6 +581,8 @@ def run_batch_job(job: BatchJob) -> None:
     job.status = "completed"
 
 
+# ── SINGLETONS ────────────────────────────────────────────────────────────────
+
 try:
     MODEL = ModelBundle(MODEL_DIR)
 except Exception as exc:
@@ -341,6 +590,17 @@ except Exception as exc:
     MODEL_ERROR = exc
 else:
     MODEL_ERROR = None
+
+try:
+    LEMMATIZER = LemmatizerBundle()
+except Exception as exc:
+    LEMMATIZER = None
+    LEMMATIZER_ERROR = exc
+else:
+    LEMMATIZER_ERROR = None
+
+
+# ── MORALIZATION ENDPOINTS ────────────────────────────────────────────────────
 
 
 @app.get("/health")
@@ -461,3 +721,62 @@ async def batch_result(job_id: str) -> Response:
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=predictions.csv"},
     )
+
+
+# ── LEMMATIZER ENDPOINTS ──────────────────────────────────────────────────────
+
+
+@app.get("/lemmas/{language}")
+async def get_lemmas(language: str) -> dict[str, object]:
+    """Return the loaded lemma list for *language* (for frontend use)."""
+    if language not in LEMMA_CACHE:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No lemma file found for language '{language}'.",
+        )
+    return {"language": language, "lemmas": LEMMA_CACHE[language]}
+
+
+@app.post("/lemmatize", response_model=LemmatizerResponse)
+async def lemmatize(request: LemmatizerRequest) -> LemmatizerResponse:
+    """
+    Find all sentences in *text* whose tokens match a lemma in the
+    pre-loaded dictionary for *language*.  Returns each match with ±2
+    sentences of context; matched tokens are wrapped in ``<mark>`` tags
+    inside ``context_html``.
+    """
+    if LEMMATIZER_ERROR or LEMMATIZER is None:
+        raise HTTPException(status_code=500, detail="Lemmatizer failed to load")
+
+    try:
+        return LEMMATIZER.find_lemmas(
+            text=request.text,
+            language=request.language,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/lemmatize/batch")
+async def lemmatize_batch(request: LemmaBatchRequest) -> list[dict]:
+    """
+    Run lemma search over multiple texts (same language for all).
+    Returns one ``LemmatizerResponse`` payload per input text, in the same order.
+    """
+    if LEMMATIZER_ERROR or LEMMATIZER is None:
+        raise HTTPException(status_code=500, detail="Lemmatizer failed to load")
+
+    try:
+        return [
+            LEMMATIZER.find_lemmas(
+                text=text,
+                language=request.language,
+            ).dict()
+            for text in request.texts
+        ]
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
