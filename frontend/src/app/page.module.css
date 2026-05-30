@@ -495,6 +495,12 @@
   font-weight: 600;
   color: var(--ink-700);
 }
+.boxTitle {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-700);
+}
 
 .formatList {
   display: grid;
@@ -505,6 +511,7 @@
 }
 
 .formatSample {
+  display: block;
   margin: 0;
   padding: 12px;
   border-radius: 12px;
@@ -512,12 +519,22 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
+  box-sizing: border-box;
 }
 
 .formatSamples {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+}
+
+.formatSamples > div {
+  min-width: 0;
 }
 
 .sampleLabel {
@@ -532,6 +549,7 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 16px;
+  min-width: 0;
 }
 
 .previewCard {
@@ -539,6 +557,7 @@
   border-radius: 14px;
   border: 1px solid rgba(10, 24, 35, 0.1);
   background: #ffffff;
+  min-width: 0;
 }
 
 .outputCard {
@@ -558,9 +577,10 @@
 }
 
 .previewTable {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
   font-family: var(--font-sans);
   font-size: 12px;
   color: var(--ink-900);
@@ -578,18 +598,24 @@
   padding: 6px 8px;
   border-bottom: 1px solid rgba(10, 24, 35, 0.08);
   vertical-align: top;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  max-width: 420px;
+  min-width: 180px;
+  width: 180px;
+  max-width: 260px;
+  overflow: hidden;
 }
 
-.cellTruncate {
+/* Enforce single-line truncation for cell content */
+.previewTable td > .cellTruncate {
   display: block;
-  max-width: 100%;
+  width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Keep original multi-line behavior for JSON pre blocks */
+.previewJsonLight .previewJson {
+  white-space: pre-wrap;
 }
 
 .previewDark {
@@ -616,6 +642,7 @@
 }
 
 .previewJson {
+  display: block;
   margin: 0;
   padding: 12px;
   border-radius: 12px;
@@ -624,10 +651,13 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
+  width: 100%;
+  max-width: 100%;
   max-height: 240px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-x: auto;
+  overflow-y: auto;
+  white-space: pre;
+  box-sizing: border-box;
 }
 
 .previewJsonLight {
@@ -662,6 +692,16 @@
   font-family: var(--font-sans);
   font-size: 12px;
   color: var(--ink-500);
+  text-align: center;
+}
+
+.footerRow {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
 }
 
 .footerLink {
@@ -713,6 +753,11 @@
   .actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .metricsCard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
   }
 
 }

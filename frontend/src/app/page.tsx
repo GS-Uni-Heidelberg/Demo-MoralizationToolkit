@@ -36,15 +36,14 @@ type BatchStatusResponse = {
 
 const MAX_PREVIEW_ROWS = 5;
 const MAX_PREVIEW_COLS = 5;
+const MAX_TEXT_LENGTH = 5000;
+const MAX_BATCH_INSTANCES = 500;
 
 const DEFAULT_TEXT =
   "Wer so handelt, liegt moralisch daneben, und die Gesellschaft darf das nicht akzeptieren.";
 
 const INITIAL_TEXT = DEFAULT_TEXT;
 
-// Robust CSV parser that supports quoted fields with embedded newlines and
-// doubled-quote escapes. It returns an array of rows, each row an array of
-// cell strings. Empty rows (all cells empty) are omitted.
 const parseCsvText = (text: string): string[][] => {
   const rows: string[][] = [];
   let curCell = "";
@@ -71,7 +70,6 @@ const parseCsvText = (text: string): string[][] => {
     }
 
     if ((ch === '\n' || ch === '\r') && !inQuotes) {
-      // Handle CRLF as a single newline
       if (ch === '\r' && text[i + 1] === '\n') {
         i += 1;
       }
@@ -98,13 +96,13 @@ const parseCsvText = (text: string): string[][] => {
   return rows.filter((r) => r.some((c) => c.length > 0));
 };
 
-const parseCsvPreview = (text: string): string[][] => {
-  const all = parseCsvText(text);
-  return all.slice(0, MAX_PREVIEW_ROWS).map((row) => row.slice(0, MAX_PREVIEW_COLS));
-};
-
 const parseCsvAll = (text: string): string[][] => {
   return parseCsvText(text);
+};
+
+const formatJsonPreview = (text: string): string => {
+  const parsed = JSON.parse(text) as unknown;
+  return JSON.stringify(parsed, null, 2);
 };
 
 export default function Home() {
@@ -142,14 +140,42 @@ export default function Home() {
   const [outputPreviewNote, setOutputPreviewNote] = useState<string | null>(
     "Run a batch request to see the output preview."
   );
+  const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(
+    null
+  );
+
+  const clearBatchRunState = () => {
+    setBatchStatus("idle");
+    setBatchError(null);
+    setBatchJobId(null);
+    setBatchProgress(0);
+    setBatchProcessed(0);
+    setBatchTotal(0);
+    if (batchDownloadUrl) {
+      URL.revokeObjectURL(batchDownloadUrl);
+      setBatchDownloadUrl(null);
+    }
+    setBatchFilename(null);
+    setBatchMetricsFilename(null);
+    setOutputPreview([]);
+    setOutputPreviewJson(null);
+    setBatchMetrics(null);
+    setOutputPreviewNote("Run a batch request to see the output preview.");
+  };
+
+  const confirmBatchReset = (message: string) => {
+    if (typeof window === "undefined") return true;
+    return window.confirm(message);
+  };
 
   const isDisabled = status === "loading" || text.trim().length === 0;
+  const isTextTooLong = text.length > MAX_TEXT_LENGTH;
+  const isSingleAnalyzeDisabled = isDisabled || isTextTooLong;
   const confidenceLabel = useMemo(() => {
     if (!result) return "--";
     return `${(result.confidence * 100).toFixed(2)}%`;
   }, [result]);
   const hasUnsavedData =
-    viewMode === "batch" &&
     batchFile !== null;
 
   useEffect(() => {
@@ -170,7 +196,7 @@ export default function Home() {
 
   const resetAppState = () => {
       const ok = window.confirm(
-          "Reset the app?\n\nThis will clear:\n- input text\n- batch file\n- results\n- metrics\n- progress"
+          "Reset the app?\nThis will clear your current progress and cannot be undone!"
         );
 
         if (!ok) return;
@@ -217,7 +243,37 @@ export default function Home() {
   }, [hasUnsavedData]);
     
   const handleBatchFileChange = async (file: File | null) => {
+    const hasDownstreamState =
+      batchOutputFormat !== null ||
+      batchStatus !== "idle" ||
+      batchDownloadUrl !== null ||
+      outputPreview.length > 0 ||
+      outputPreviewJson !== null ||
+      batchMetrics !== null;
+
+    const isFileActuallyChanging =
+      (batchFile === null && file !== null) ||
+      (batchFile !== null && file === null) ||
+      (batchFile !== null &&
+        file !== null &&
+        (batchFile.name !== file.name ||
+          batchFile.size !== file.size ||
+          batchFile.lastModified !== file.lastModified));
+
+    if (isFileActuallyChanging && hasDownstreamState) {
+      const ok = confirmBatchReset(
+        "Changing the uploaded file will reset all later batch steps. Continue?"
+      );
+      if (!ok) return;
+    }
+
+    if (isFileActuallyChanging) {
+      clearBatchRunState();
+      setBatchOutputFormat(null);
+    }
+
     setBatchFile(file);
+    setBatchInputLimitError(null);
     setInputPreview([]);
     setInputPreviewJson(null);
     setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
@@ -234,28 +290,98 @@ export default function Home() {
     try {
       const textContent = await file.text();
       if (isJson) {
-        const prettyJson = JSON.stringify(JSON.parse(textContent), null, 2);
+        const parsedJson = JSON.parse(textContent) as unknown;
+        const jsonInstanceCount = Array.isArray(parsedJson)
+          ? parsedJson.length
+          : parsedJson && typeof parsedJson === "object"
+            ? 1
+            : 0;
+
+        if (jsonInstanceCount > MAX_BATCH_INSTANCES) {
+          setBatchFile(null);
+          setInputPreview([]);
+          setInputPreviewJson(null);
+          setBatchOutputFormat(null);
+          setBatchInputLimitError(
+            `Too many instances: ${jsonInstanceCount}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
+          );
+          setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
+          return;
+        }
+
+        const prettyJson = formatJsonPreview(textContent);
         setInputPreview([]);
         setInputPreviewJson(prettyJson);
-        setInputPreviewNote(null);
+        setInputPreviewNote(`Instances detected: ${jsonInstanceCount}`);
         return;
       }
-      const preview = parseCsvPreview(textContent);
-      if (preview.length === 0) {
+      const allRows = parseCsvAll(textContent);
+      if (allRows.length === 0) {
         setInputPreviewNote("No rows detected in the CSV file.");
         return;
       }
+      const firstRow = allRows[0].map((cell) => cell.toLowerCase().trim());
+      const hasHeader = firstRow.includes("text");
+      const csvInstanceCount = hasHeader ? Math.max(allRows.length - 1, 0) : allRows.length;
+
+      if (csvInstanceCount > MAX_BATCH_INSTANCES) {
+        setBatchFile(null);
+        setInputPreview([]);
+        setInputPreviewJson(null);
+        setBatchOutputFormat(null);
+        setBatchInputLimitError(
+          `Too many instances: ${csvInstanceCount}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
+        );
+        setInputPreviewNote("Upload a CSV or JSON file to see a preview.");
+        return;
+      }
+
+      const preview = allRows
+        .slice(0, MAX_PREVIEW_ROWS)
+        .map((row) => row.slice(0, MAX_PREVIEW_COLS));
       setInputPreview(preview);
-      setInputPreviewNote(null);
+      setInputPreviewNote(`Instances detected: ${csvInstanceCount}`);
     } catch {
+      setBatchInputLimitError(null);
       setInputPreviewNote("Could not read CSV preview.");
     }
+  };
+
+  const handleBatchOutputFormatChange = (value: string) => {
+    const nextFormat =
+      value === "json" ? "json" : value === "csv" ? "csv" : null;
+
+    if (nextFormat === batchOutputFormat) return;
+
+    const hasDownstreamState =
+      batchStatus !== "idle" ||
+      batchDownloadUrl !== null ||
+      outputPreview.length > 0 ||
+      outputPreviewJson !== null ||
+      batchMetrics !== null;
+
+    if (hasDownstreamState) {
+      const ok = confirmBatchReset(
+        "Changing the output format will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+    }
+
+    clearBatchRunState();
+    setBatchOutputFormat(nextFormat);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (trimmed.length > MAX_TEXT_LENGTH) {
+      setStatus("error");
+      setErrorMessage(
+        `Input is too long (${trimmed.length} chars). Maximum allowed is ${MAX_TEXT_LENGTH}.`
+      );
+      return;
+    }
 
     setStatus("loading");
     setErrorMessage(null);
@@ -359,11 +485,7 @@ export default function Home() {
 
           if (batchOutputFormat === "json") {
             const textContent = await resultResponse.text();
-            const prettyJson = JSON.stringify(
-              JSON.parse(textContent),
-              null,
-              2
-            );
+            const prettyJson = formatJsonPreview(textContent);
             setOutputPreview([]);
             setOutputPreviewJson(prettyJson);
             setOutputPreviewNote(null);
@@ -468,7 +590,7 @@ export default function Home() {
     <div className={styles.page}>
       <main className={styles.main}>
         <section className={styles.hero}>
-          <p className={styles.eyebrow}>Moralization Detection</p>
+          <p className={styles.eyebrow}>Moralization Detection Toolkit</p>
           <h1>Analyze moral framing in German texts.</h1>
           <p className={styles.subtitle}>
             CPU-only RoBERTa inference with single text and batch processing.
@@ -514,56 +636,69 @@ export default function Home() {
 
         {viewMode === "single" ? (
           <>
-            <section className={styles.panel}>
-              <form className={styles.form} onSubmit={handleSubmit}>
-                <label className={styles.label} htmlFor="textInput">
-                  Text input
-                </label>
-                <textarea
-                  id="textInput"
-                  className={styles.textarea}
-                  value={text}
-                  onChange={(event) => setText(event.target.value)}
-                  rows={7}
-                  placeholder="Paste text to analyze for moralization..."
-                />
+            <section className={styles.batchPanel}>
+              <p className={styles.boxTitle}>Moralization Detection with Dictionary Approach (DiMi)</p>
+              <p>TODO</p>
 
-                <div className={styles.actions}>
-                  <button
-                    className={styles.primaryButton}
-                    type="submit"
-                    disabled={isDisabled}
-                  >
-                    {status === "loading" ? "Analyzing..." : "Analyze"}
-                  </button>
-                  <span className={styles.hint}>Local model: XLM-RoBERTa</span>
-                </div>
-              </form>
             </section>
 
-            {result && (
-              <section className={styles.resultCard}>
-                <div>
-                  <p className={styles.resultLabel}>Prediction</p>
-                  <p className={styles.resultValue}>
-                    {result.label.replace("_", " ")}
-                  </p>
-                </div>
-                <div>
-                  <p className={styles.resultLabel}>Confidence</p>
-                  <p className={styles.resultValue}>{confidenceLabel}</p>
-                </div>
-              </section>
-            )}
+            <section className={styles.batchPanel}>
+              <p className={styles.boxTitle}>Moralization Detection with Language Models</p>
+              <section className={styles.panel}>
+                <form className={styles.form} onSubmit={handleSubmit}>
+                  <label className={styles.label} htmlFor="textInputSecondary">
+                    Text input
+                  </label>
+                  <textarea
+                    id="textInputSecondary"
+                    className={styles.textarea}
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
+                    rows={7}
+                    maxLength={MAX_TEXT_LENGTH}
+                    placeholder="Paste text to analyze for moralization..."
+                  />
 
-            {status === "error" && (
-              <p className={styles.errorMessage}>{errorMessage}</p>
-            )}
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.primaryButton}
+                      type="submit"
+                      disabled={isSingleAnalyzeDisabled}
+                    >
+                      {status === "loading" ? "Analyzing..." : "Analyze"}
+                    </button>
+                    <span className={styles.hint}>
+                      Local model: XLM-RoBERTa · {text.length}/{MAX_TEXT_LENGTH}
+                    </span>
+                  </div>
+                </form>
+              </section>
+
+              {result && (
+                <section className={styles.resultCard}>
+                  <div>
+                    <p className={styles.resultLabel}>Prediction</p>
+                    <p className={styles.resultValue}>
+                      {result.label.replace("_", " ")}
+                    </p>
+                  </div>
+                  <div>
+                    <p className={styles.resultLabel}>Confidence</p>
+                    <p className={styles.resultValue}>{confidenceLabel}</p>
+                  </div>
+                </section>
+              )}
+
+              {status === "error" && (
+                <p className={styles.errorMessage}>{errorMessage}</p>
+              )}
+            </section>
           </>
         ) : (
           <section className={styles.batchPanel}>
 
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
+              <p className={styles.boxTitle}>Pipeline Moralization Detection (DiMi + Language Models)</p>
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
                 <div className={styles.formatList}>
@@ -598,6 +733,9 @@ export default function Home() {
                     handleBatchFileChange(event.target.files?.[0] ?? null)
                   }
                 />
+                {batchInputLimitError && (
+                  <p className={styles.errorMessage}>{batchInputLimitError}</p>
+                )}
               </div>
 
               {batchFile && (
@@ -609,7 +747,7 @@ export default function Home() {
                     </pre>
                   ) : inputPreview.length > 0 ? (
                     <div className={styles.previewScroll}>
-                      <table className={styles.previewTable}>
+                      <table className={`${styles.previewTable} ${styles.previewJsonLight}`}>
                         <tbody>
                             {inputPreview.map((row, i) => (
                             <tr key={i}>
@@ -640,15 +778,7 @@ export default function Home() {
                     id="outputFormat"
                     className={`${styles.select} ${styles.primarySelect}`}
                     value={batchOutputFormat ?? ""}
-                    onChange={(event) =>
-                      setBatchOutputFormat(
-                        event.target.value === "json"
-                          ? "json"
-                          : event.target.value === "csv"
-                            ? "csv"
-                            : null
-                      )
-                    }
+                    onChange={(event) => handleBatchOutputFormatChange(event.target.value)}
                     required
                   >
                     <option value="" disabled>
@@ -667,7 +797,10 @@ export default function Home() {
                       className={styles.primaryButton}
                       type="submit"
                       disabled={
-                        !batchFile || !batchOutputFormat || batchStatus === "uploading"
+                        !batchFile ||
+                        !batchOutputFormat ||
+                        batchStatus === "uploading" ||
+                        !!batchInputLimitError
                       }
                     >
                       {batchStatus === "uploading" || batchStatus === "processing"
@@ -697,7 +830,7 @@ export default function Home() {
               {(batchStatus === "done" || outputPreviewJson || outputPreview.length > 0) && (
                 <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
                   <p className={styles.previewTitle}>
-                    Output preview ({batchOutputFormat.toUpperCase()})
+                    Output preview ({(batchOutputFormat ?? "csv").toUpperCase()})
                   </p>
                   {batchOutputFormat === "csv" ? (
                     outputPreview.length > 0 ? (
@@ -822,12 +955,12 @@ export default function Home() {
         </div>
 
         <div className={styles.footerRow}>
-          <a className={styles.footerLink} href="/impressum">
-            Legal Notice / Impressum
+          <a className={styles.footerLink} href="https://www.uni-heidelberg.de/en/imprint">
+            Imprint / Impressum
           </a>
           <span className={styles.footerDivider}> | </span>
-          <a className={styles.footerLink} href="/datenschutz">
-            Privacy Policy / Datenschutz
+          <a className={styles.footerLink} href="https://www.uni-heidelberg.de/en/privacy-statement">
+            Privacy Statement / Datenschutzerklärung
           </a>
         </div>
       </footer>

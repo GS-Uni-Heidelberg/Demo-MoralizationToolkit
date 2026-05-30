@@ -62,12 +62,16 @@ class BatchJob:
         texts: list[str],
         labels: list[int] | None,
         ids: list[str],
+        extras: list[dict[str, object]],
+        extra_fieldnames: list[str],
     ) -> None:
         self.job_id = job_id
         self.output_format = output_format
         self.texts = texts
         self.labels = labels
         self.ids = ids
+        self.extras = extras
+        self.extra_fieldnames = extra_fieldnames
         self.total = len(texts)
         self.processed = 0
         self.status = "queued"
@@ -127,12 +131,16 @@ def parse_label(value: object) -> int:
     raise ValueError(f"Invalid label value: {value}")
 
 
-def parse_csv_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, list[str]]:
+def parse_csv_texts(
+    raw_bytes: bytes,
+) -> tuple[list[str], list[int] | None, list[str], list[dict[str, object]], list[str]]:
     content = raw_bytes.decode("utf-8", errors="ignore")
     reader = csv.DictReader(io.StringIO(content))
     texts: list[str] = []
     labels: list[int] = []
     ids: list[str] = []
+    extras: list[dict[str, object]] = []
+    extra_fieldnames: list[str] = []
 
     if reader.fieldnames:
         normalized = [name.strip().lower() for name in reader.fieldnames]
@@ -154,12 +162,22 @@ def parse_csv_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, list
         id_field = None
 
     if text_field:
+        excluded_fields = {text_field}
+        if label_field:
+            excluded_fields.add(label_field)
+        if id_field:
+            excluded_fields.add(id_field)
+
+        if reader.fieldnames:
+            extra_fieldnames = [name for name in reader.fieldnames if name not in excluded_fields]
+
         for row in reader:
             text = str(row.get(text_field, "")).strip()
             if text:
                 texts.append(text)
                 if id_field:
                     ids.append(str(row.get(id_field, "")).strip())
+                extras.append({name: row.get(name, "") for name in extra_fieldnames})
             if label_field:
                 raw_label = row.get(label_field, "")
                 if raw_label in {None, ""}:
@@ -167,7 +185,7 @@ def parse_csv_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, list
                 labels.append(parse_label(raw_label))
         if not id_field:
             ids = [str(index) for index in range(1, len(texts) + 1)]
-        return texts, labels if label_field else None, ids
+        return texts, labels if label_field else None, ids, extras, extra_fieldnames
 
     fallback_reader = csv.reader(io.StringIO(content))
     for row in fallback_reader:
@@ -178,15 +196,20 @@ def parse_csv_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, list
             texts.append(text)
     ids = [str(index) for index in range(1, len(texts) + 1)]
 
-    return texts, None, ids
+    extras = [{} for _ in texts]
+    return texts, None, ids, extras, []
 
 
-def parse_json_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, list[str]]:
+def parse_json_texts(
+    raw_bytes: bytes,
+) -> tuple[list[str], list[int] | None, list[str], list[dict[str, object]], list[str]]:
     content = raw_bytes.decode("utf-8", errors="ignore")
     payload = json.loads(content)
     texts: list[str] = []
     labels: list[int] = []
     ids: list[str | None] = []
+    extras: list[dict[str, object]] = []
+    extra_fieldnames: list[str] = []
 
     if not isinstance(payload, list):
         raise ValueError("JSON must be a list of objects with a text field.")
@@ -195,13 +218,20 @@ def parse_json_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, lis
     for item in payload:
         if not isinstance(item, dict):
             raise ValueError("Each JSON item must be an object with a text field.")
-        if set(item.keys()) - {"text", "label", "id"}:
-            raise ValueError("Only text, optional label, and optional id fields are allowed in JSON items.")
 
         text = str(item.get("text", "")).strip()
         if text:
             texts.append(text)
             ids.append(str(item.get("id")).strip() if "id" in item else None)
+            extra_item = {
+                key: value
+                for key, value in item.items()
+                if key not in {"text", "label", "id"}
+            }
+            extras.append(extra_item)
+            for key in extra_item.keys():
+                if key not in extra_fieldnames:
+                    extra_fieldnames.append(key)
         if "label" in item:
             label_present = True
             labels.append(parse_label(item.get("label")))
@@ -218,7 +248,7 @@ def parse_json_texts(raw_bytes: bytes) -> tuple[list[str], list[int] | None, lis
     for index, value in enumerate(ids, start=1):
         resolved_ids.append(value if value else str(index))
 
-    return texts, labels if label_present else None, resolved_ids
+    return texts, labels if label_present else None, resolved_ids, extras, extra_fieldnames
 
 
 def label_to_binary(label: str) -> int:
@@ -265,11 +295,17 @@ def run_batch_job(job: BatchJob) -> None:
         prediction = MODEL.predict(text)
         predicted_binary.append(label_to_binary(prediction.label))
         confidence_str = f"{prediction.confidence:.4f}"
-        result_item = {"id": job.ids[index - 1], "text": text}
+        result_item: dict[str, object] = {
+            "id": job.ids[index - 1],
+            "text": text,
+        }
         if job.labels:
             result_item["true_label"] = "moralization" if job.labels[index - 1] == 1 else "no_moralization"
         result_item["label"] = prediction.label
         result_item["confidence"] = confidence_str
+        # Keep all additional fields at the end of each output row.
+        for key, value in job.extras[index - 1].items():
+            result_item[key] = value
         results.append(result_item)
         job.processed = index
 
@@ -283,9 +319,9 @@ def run_batch_job(job: BatchJob) -> None:
         job.result_json = {"results": results}
     else:
         output = io.StringIO()
-        fieldnames = ["id", "text", "label", "confidence"]
+        fieldnames = ["id", "text", "label", "confidence", *job.extra_fieldnames]
         if job.labels:
-            fieldnames = ["id", "text", "true_label", "label", "confidence"]
+            fieldnames = ["id", "text", "true_label", "label", "confidence", *job.extra_fieldnames]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(results)
@@ -338,9 +374,9 @@ async def batch_start(
 
     try:
         if filename.endswith(".csv") or content_type in {"text/csv", "application/csv"}:
-            texts, labels, ids = parse_csv_texts(raw_bytes)
+            texts, labels, ids, extras, extra_fieldnames = parse_csv_texts(raw_bytes)
         elif filename.endswith(".json") or content_type in {"application/json", "text/json"}:
-            texts, labels, ids = parse_json_texts(raw_bytes)
+            texts, labels, ids, extras, extra_fieldnames = parse_json_texts(raw_bytes)
         else:
             raise HTTPException(
                 status_code=400,
@@ -356,7 +392,15 @@ async def batch_start(
         raise HTTPException(status_code=400, detail="Unsupported output format")
 
     job_id = str(uuid.uuid4())
-    job = BatchJob(job_id=job_id, output_format=fmt, texts=texts, labels=labels, ids=ids)
+    job = BatchJob(
+        job_id=job_id,
+        output_format=fmt,
+        texts=texts,
+        labels=labels,
+        ids=ids,
+        extras=extras,
+        extra_fieldnames=extra_fieldnames,
+    )
     with JOB_LOCK:
         JOBS[job_id] = job
 
