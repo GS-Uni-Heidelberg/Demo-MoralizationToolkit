@@ -737,9 +737,9 @@ export default function Home() {
       <main className={styles.main}>
         <section className={styles.hero}>
           <p className={styles.eyebrow}>Moralization Detection Toolkit</p>
-          <h1>Analyze moral framing in German texts.</h1>
+          <h1>Analyze moral framing in texts.</h1>
           <p className={styles.subtitle}>
-            CPU-only RoBERTa inference with single text and batch processing.
+            Moralization detection with dictionaries and language models.
           </p>
         </section>
 
