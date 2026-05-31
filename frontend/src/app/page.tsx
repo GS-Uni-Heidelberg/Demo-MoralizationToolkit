@@ -194,7 +194,7 @@ export default function Home() {
   const [batchProgress, setBatchProgress] = useState<number>(0);
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
   const [batchTotal, setBatchTotal] = useState<number>(0);
-  const [skipNoDimiMatches, setSkipNoDimiMatches] = useState<boolean>(false);
+  const [skipNoDimiMatches, setSkipNoDimiMatches] = useState<boolean | null>(null);
   const [inputPreview, setInputPreview] = useState<string[][]>([]);
   const [inputPreviewJson, setInputPreviewJson] = useState<string | null>(null);
   const [outputPreview, setOutputPreview] = useState<string[][]>([]);
@@ -234,7 +234,7 @@ export default function Home() {
     setBatchDimiTotal(0);
     setBatchDimiPreparedFile(null);
     setBatchDimiSkipped(false);
-    setSkipNoDimiMatches(false);
+    setSkipNoDimiMatches(null);
     setDimiPreviewRows([]);
     setDimiPreviewJson(null);
     setDimiPreviewNote("Run DiMi preprocessing to see the output preview.");
@@ -339,6 +339,7 @@ export default function Home() {
     setBatchDimiTotal(0);
     setBatchDimiPreparedFile(null);
     setBatchDimiSkipped(false);
+    setSkipNoDimiMatches(null);
     setBatchFilename(null);
     setBatchMetricsFilename(null);
     setBatchProgress(0);
@@ -1605,28 +1606,41 @@ export default function Home() {
                 </div>
               )}
 
-              {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
-                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>   
-                  <div className={styles.boxHeader}>
-                    <p className={styles.previewTitle}>Skip instances with no Dimi Matches; these are also ignored for the metrics calculation</p>
-                  </div>
-                  <label className={styles.checkboxRow}>
-                    <input
-                      className={styles.checkboxInput}
-                      type="checkbox"
-                      checked={skipNoDimiMatches}
-                      onChange={(event) =>
-                        handleSkipNoDimiMatchesChange(event.target.checked)
-                      }
-                    />
-                    <span className={styles.checkboxLabel}>
-                      Skip instances with no DiMi matches
-                    </span>
-                  </label>
+              {batchDimiStatus === "done" && batchDimiPreparedFile && batchDimiSkipped && (
+                <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
+                  <p className={styles.previewTitle}>DiMi preprocessing skipped...</p>
                 </div>
               )}
 
-              {batchDimiStatus === "done" && batchDimiPreparedFile && (
+              {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <div className={styles.boxHeader}>
+                    <p className={styles.previewTitle}>Skip instances with no DiMi Matches; these are also ignored for the metrics calculation</p>
+                  </div>
+                  <div className={styles.languageSwitch}>
+                    <div className={styles.modeTabs}>
+                      <button
+                        type="button"
+                        className={`${styles.modeTab} ${skipNoDimiMatches === false ? styles.modeTabActive : ""}`}
+                        onClick={() => handleSkipNoDimiMatchesChange(false)}
+                        aria-pressed={skipNoDimiMatches === false}
+                      >
+                        Keep all
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.modeTab} ${skipNoDimiMatches === true ? styles.modeTabActive : ""}`}
+                        onClick={() => handleSkipNoDimiMatchesChange(true)}
+                        aria-pressed={skipNoDimiMatches === true}
+                      >
+                        Skip Intances with no DiMi matches
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {batchDimiStatus === "done" && batchDimiPreparedFile && skipNoDimiMatches !== null && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>Run LM Detection ...</p>

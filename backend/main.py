@@ -654,10 +654,10 @@ def run_batch_job(job: BatchJob) -> None:
 
         if "full_text" in input_extras:
             result_item["full_text"] = input_extras.get("full_text", text)
+        # Always include the parsed dimi match count from the job (falls back to 0)
+        result_item["dimi_matches"] = dimi_match_count
         if "dimi_matched_lemmas" in input_extras:
             result_item["dimi_matched_lemmas"] = input_extras.get("dimi_matched_lemmas", "")
-        if "dimi_matches" in input_extras:
-            result_item["dimi_matches"] = input_extras.get("dimi_matches", "")
 
         for fieldname in output_extra_fieldnames:
             result_item[fieldname] = input_extras.get(fieldname, "")
@@ -678,19 +678,22 @@ def run_batch_job(job: BatchJob) -> None:
             fieldnames = ["id", "text"]
             if "full_text" in job.extra_fieldnames:
                 fieldnames.append("full_text")
+            # include dimi_matches column when dimi match counts were provided
+            if job.dimi_matches is not None:
+                fieldnames.append("dimi_matches")
             if "dimi_matched_lemmas" in job.extra_fieldnames:
                 fieldnames.append("dimi_matched_lemmas")
-            if "dimi_matches" in job.extra_fieldnames:
-                fieldnames.append("dimi_matches")
             fieldnames.extend(["label", f"prediction_{MODEL_NAME}", f"confidence_{MODEL_NAME}"])
             fieldnames.extend(output_extra_fieldnames)
         else:
             fieldnames = ["id", "text"]
             if "full_text" in job.extra_fieldnames:
                 fieldnames.append("full_text")
+            # include dimi_matches column when dimi match counts were provided
+            if job.dimi_matches is not None:
+                fieldnames.append("dimi_matches")
             if "dimi_matched_lemmas" in job.extra_fieldnames:
-                            fieldnames.append("dimi_matched_lemmas")
-
+                fieldnames.append("dimi_matched_lemmas")
             fieldnames.extend([f"prediction_{MODEL_NAME}", f"confidence_{MODEL_NAME}"])
             fieldnames.extend(output_extra_fieldnames)
 
