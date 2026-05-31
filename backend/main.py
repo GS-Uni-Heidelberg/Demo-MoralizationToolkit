@@ -27,6 +27,7 @@ DEFAULT_MODEL_DIR = (
     / "checkpoint-1473"
 )
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", DEFAULT_MODEL_DIR))
+MODEL_NAME = "roberta-finetuned"
 
 LEMMAS_DIR = Path(os.environ.get("LEMMAS_DIR", ROOT_DIR / "models" / "dimi"))
 
@@ -613,12 +614,12 @@ def run_batch_job(job: BatchJob) -> None:
     reserved_fields = {
         "id",
         "text",
-        "label",
-        "prediction",
-        "confidence",
         "full_text",
-        "dimi_matched_lemmas",
+        "label",
+        f"prediction_{MODEL_NAME}",
+        f"confidence_{MODEL_NAME}",
         "dimi_matches",
+        "dimi_matched_lemmas",
         "no_dimi_match",
     }
     output_extra_fieldnames = [
@@ -648,13 +649,15 @@ def run_batch_job(job: BatchJob) -> None:
             result_item["label"] = (
                 "moralization" if job.labels[index - 1] == 1 else "no_moralization"
             )
-        result_item["prediction"] = prediction_label
-        result_item["confidence"] = confidence_str
+        result_item[f"prediction_{MODEL_NAME}"] = prediction_label
+        result_item[f"confidence_{MODEL_NAME}"] = confidence_str
 
         if "full_text" in input_extras:
             result_item["full_text"] = input_extras.get("full_text", text)
         if "dimi_matched_lemmas" in input_extras:
             result_item["dimi_matched_lemmas"] = input_extras.get("dimi_matched_lemmas", "")
+        if "dimi_matches" in input_extras:
+            result_item["dimi_matches"] = input_extras.get("dimi_matches", "")
 
         for fieldname in output_extra_fieldnames:
             result_item[fieldname] = input_extras.get(fieldname, "")
@@ -672,18 +675,23 @@ def run_batch_job(job: BatchJob) -> None:
     else:
         output = io.StringIO()
         if job.labels:
-            fieldnames = ["id", "text", "label", "prediction", "confidence"]
+            fieldnames = ["id", "text"]
             if "full_text" in job.extra_fieldnames:
                 fieldnames.append("full_text")
             if "dimi_matched_lemmas" in job.extra_fieldnames:
                 fieldnames.append("dimi_matched_lemmas")
+            if "dimi_matches" in job.extra_fieldnames:
+                fieldnames.append("dimi_matches")
+            fieldnames.extend(["label", f"prediction_{MODEL_NAME}", f"confidence_{MODEL_NAME}"])
             fieldnames.extend(output_extra_fieldnames)
         else:
-            fieldnames = ["id", "text", "prediction", "confidence"]
+            fieldnames = ["id", "text"]
             if "full_text" in job.extra_fieldnames:
                 fieldnames.append("full_text")
             if "dimi_matched_lemmas" in job.extra_fieldnames:
-                fieldnames.append("dimi_matched_lemmas")
+                            fieldnames.append("dimi_matched_lemmas")
+
+            fieldnames.extend([f"prediction_{MODEL_NAME}", f"confidence_{MODEL_NAME}"])
             fieldnames.extend(output_extra_fieldnames)
 
         deduped_fieldnames: list[str] = []

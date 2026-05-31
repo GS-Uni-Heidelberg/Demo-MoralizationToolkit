@@ -271,6 +271,14 @@ export default function Home() {
       outputPreviewJson !== null ||
       batchMetrics !== null
     );
+};
+
+  const hasDimiResultState = () => {
+    return (
+      batchDimiStatus === "done" ||
+      dimiStatus !== "idle" ||
+      dimiResult !== null
+    );
   };
 
   const isDisabled = status === "loading" || text.trim().length === 0;
@@ -587,14 +595,14 @@ export default function Home() {
   const handleBatchDimiSubmit = async () => {
     if (!batchFile || !batchOutputFormat || !batchLanguage) return;
 
-    if (hasBatchResultState()) {
+    if (hasBatchResultState() || hasDimiResultState()) {
       const ok = confirmBatchReset(
         "Running DiMi preprocessing will reset the current batch results. Continue?"
       );
       if (!ok) return;
       clearBatchRunState();
     }
-
+    clearBatchDimiState();
     setBatchDimiStatus("processing");
     setBatchDimiError(null);
     setBatchDimiProgress(0);
@@ -736,7 +744,7 @@ export default function Home() {
   const handleSkipBatchDimiSubmit = async () => {
     if (!batchFile || !batchOutputFormat || !batchLanguage) return;
 
-    if (hasBatchResultState()) {
+    if (hasBatchResultState() || hasDimiResultState()) {
       const ok = confirmBatchReset(
         "Skipping DiMi preprocessing will reset the current batch results. Continue?"
       );
@@ -744,6 +752,7 @@ export default function Home() {
       clearBatchRunState();
     }
 
+    setSkipNoDimiMatches(false);
     setBatchDimiError(null);
     setBatchDimiProgress(0);
     setBatchDimiProcessed(0);
@@ -1355,7 +1364,7 @@ export default function Home() {
           <section className={styles.batchPanel}>
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
               <p className={styles.boxTitle}>
-                Pipeline Moralization Detection (Language Models)
+                Pipeline Moralization Detection (DiMi + Language Models)
               </p>
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
@@ -1554,8 +1563,8 @@ export default function Home() {
                         <thead>
                           <tr>
                             <th>id</th>
-                            <th>full_text</th>
                             <th>text</th>
+                            <th>full_text</th>
                             <th>dimi_matches</th>
                             <th>dimi_matched_lemmas</th>
                           </tr>
@@ -1597,10 +1606,10 @@ export default function Home() {
               )}
 
               {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
-                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>                    
-                  <span className={styles.previewTitle}>
-                    Skip instances with no Dimi Matches; these are also ignored for the metrics calculation
-                  </span>
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>   
+                  <div className={styles.boxHeader}>
+                    <p className={styles.previewTitle}>Skip instances with no Dimi Matches; these are also ignored for the metrics calculation</p>
+                  </div>
                   <label className={styles.checkboxRow}>
                     <input
                       className={styles.checkboxInput}
