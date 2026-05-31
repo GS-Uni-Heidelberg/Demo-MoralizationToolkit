@@ -166,6 +166,7 @@ export default function Home() {
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
   const [batchOutputFormat, setBatchOutputFormat] = useState<"csv" | "json" | null>(null);
+  const [batchLanguage, setBatchLanguage] = useState<LanguageCode | null>(null);
   const [batchFilename, setBatchFilename] = useState<string | null>(null);
   const [batchMetricsFilename, setBatchMetricsFilename] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<number>(0);
@@ -252,6 +253,7 @@ export default function Home() {
     setBatchError(null);
     setBatchDownloadUrl(null);
     setBatchOutputFormat(null);
+    setBatchLanguage(null);
     setBatchFilename(null);
     setBatchMetricsFilename(null);
     setBatchProgress(0);
@@ -368,6 +370,7 @@ export default function Home() {
     if (isFileActuallyChanging) {
       clearBatchRunState();
       setBatchOutputFormat(null);
+      setBatchLanguage(null);
     }
 
     setBatchFile(file);
@@ -400,6 +403,7 @@ export default function Home() {
           setInputPreview([]);
           setInputPreviewJson(null);
           setBatchOutputFormat(null);
+          setBatchLanguage(null);
           setBatchInputLimitError(
             `Too many instances: ${jsonInstanceCount}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
           );
@@ -428,6 +432,7 @@ export default function Home() {
         setInputPreview([]);
         setInputPreviewJson(null);
         setBatchOutputFormat(null);
+        setBatchLanguage(null);
         setBatchInputLimitError(
           `Too many instances: ${csvInstanceCount}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
         );
@@ -467,11 +472,36 @@ export default function Home() {
 
     clearBatchRunState();
     setBatchOutputFormat(nextFormat);
+    setBatchLanguage(null);
+  };
+
+  const handleBatchLanguageChange = (value: string) => {
+    const nextLanguage = LANGUAGE_OPTIONS.some((option) => option.code === value)
+      ? (value as LanguageCode)
+      : null;
+    if (!nextLanguage || nextLanguage === batchLanguage) return;
+
+    const hasDownstreamState =
+      batchStatus !== "idle" ||
+      batchDownloadUrl !== null ||
+      outputPreview.length > 0 ||
+      outputPreviewJson !== null ||
+      batchMetrics !== null;
+
+    if (hasDownstreamState) {
+      const ok = confirmBatchReset(
+        "Changing the language will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+    }
+
+    clearBatchRunState();
+    setBatchLanguage(nextLanguage);
   };
 
   const handleBatchSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!batchFile || !batchOutputFormat) return;
+    if (!batchFile || !batchOutputFormat || !batchLanguage) return;
 
     setBatchStatus("uploading");
     setBatchError(null);
@@ -490,6 +520,7 @@ export default function Home() {
       const formData = new FormData();
       formData.append("file", batchFile);
       formData.append("output_format", batchOutputFormat);
+      formData.append("language", batchLanguage);
 
       const response = await fetch("http://localhost:8000/batch/start", {
         method: "POST",
@@ -914,6 +945,7 @@ export default function Home() {
                   </p>
                   <p>If <b>no ids</b> are provided, ids are auto-generated.</p>
                   <p>If <b>no labels</b> are provided, metrics are not calculated.</p>
+                  <p>Additional columns in jsons and csvs are kept as is.</p>
                 </div>
                 <div className={styles.formatSamples}>
                   <div>
@@ -982,26 +1014,56 @@ export default function Home() {
 
               {batchFile && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
-                  <p className={styles.previewTitle}>Select output file format ...</p>
-                  <select
-                    id="outputFormat"
-                    className={`${styles.select} ${styles.primarySelect}`}
-                    value={batchOutputFormat ?? ""}
-                    onChange={(event) =>
-                      handleBatchOutputFormatChange(event.target.value)
-                    }
-                    required
-                  >
-                    <option value="" disabled>
-                      Select format
-                    </option>
-                    <option value="csv">CSV</option>
-                    <option value="json">JSON</option>
-                  </select>
+                  <div className={styles.languageSwitch}>
+                    <span className={styles.label}>Select output file format...</span>
+                    <div className={styles.modeTabs}>
+                      {[
+                        { code: "csv", label: "CSV", name: "CSV" },
+                        { code: "json", label: "JSON", name: "JSON" },
+                      ].map((option) => (
+                        <button
+                          key={option.code}
+                          className={`${styles.modeTab} ${
+                            batchOutputFormat === option.code ? styles.modeTabActive : ""
+                          }`}
+                          type="button"
+                          onClick={() => handleBatchOutputFormatChange(option.code)}
+                          aria-pressed={batchOutputFormat === option.code}
+                          title={option.name}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
 
               {batchFile && batchOutputFormat && (
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <div className={styles.languageSwitch}>
+                    <span className={styles.label}>Select the input language...</span>
+                    <div className={styles.modeTabs}>
+                      {LANGUAGE_OPTIONS.map((option) => (
+                        <button
+                          key={option.code}
+                          className={`${styles.modeTab} ${
+                            batchLanguage === option.code ? styles.modeTabActive : ""
+                          }`}
+                          type="button"
+                          onClick={() => handleBatchLanguageChange(option.code)}
+                          aria-pressed={batchLanguage === option.code}
+                          title={option.name}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {batchFile && batchOutputFormat && batchLanguage && (
                 <div
                   className={`${styles.batchActions} ${styles.sectionBox} ${styles.fadeInSection}`}
                 >
@@ -1012,6 +1074,7 @@ export default function Home() {
                       disabled={
                         !batchFile ||
                         !batchOutputFormat ||
+                        !batchLanguage ||
                         batchStatus === "uploading" ||
                         !!batchInputLimitError
                       }
