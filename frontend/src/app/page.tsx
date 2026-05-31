@@ -27,6 +27,16 @@ type LemmatizerResponse = {
   total_sentences: number;
 };
 
+type DimiPreviewRow = {
+  id: string;
+  full_text: string;
+  text: string;
+  dimi_matches: number;
+  dimi_matched_lemmas: string[];
+};
+
+type BatchDimiStatus = "idle" | "processing" | "error" | "done";
+
 
 type BatchMetrics = {
   accuracy: string;
@@ -134,8 +144,8 @@ export default function Home() {
   const [dimiResult, setDimiResult] = useState<LemmatizerResponse | null>(null);
   const [dimiStatus, setDimiStatus] = useState<"idle" | "loading" | "error">("idle");
   const [dimiError, setDimiError] = useState<string | null>(null);
-  const [lemmaCount, setLemmaCount] = useState<number | null>(null);
   const [dimiCopied, setDimiCopied] = useState<Record<number, boolean>>({});
+  const [lemmaCount, setLemmaCount] = useState<number | null>(null);
 
   // Fetch lemma count whenever the selected language changes
   useEffect(() => {
@@ -167,11 +177,24 @@ export default function Home() {
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
   const [batchOutputFormat, setBatchOutputFormat] = useState<"csv" | "json" | null>(null);
   const [batchLanguage, setBatchLanguage] = useState<LanguageCode | null>(null);
+  const [batchDimiStatus, setBatchDimiStatus] = useState<BatchDimiStatus>("idle");
+  const [batchDimiError, setBatchDimiError] = useState<string | null>(null);
+  const [batchDimiProgress, setBatchDimiProgress] = useState<number>(0);
+  const [batchDimiProcessed, setBatchDimiProcessed] = useState<number>(0);
+  const [batchDimiTotal, setBatchDimiTotal] = useState<number>(0);
+  const [batchDimiPreparedFile, setBatchDimiPreparedFile] = useState<File | null>(null);
+  const [batchDimiSkipped, setBatchDimiSkipped] = useState<boolean>(false);
+  const [dimiPreviewRows, setDimiPreviewRows] = useState<DimiPreviewRow[]>([]);
+  const [dimiPreviewJson, setDimiPreviewJson] = useState<string | null>(null);
+  const [dimiPreviewNote, setDimiPreviewNote] = useState<string | null>(
+    "Run DiMi preprocessing to see the output preview."
+  );
   const [batchFilename, setBatchFilename] = useState<string | null>(null);
   const [batchMetricsFilename, setBatchMetricsFilename] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<number>(0);
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
   const [batchTotal, setBatchTotal] = useState<number>(0);
+  const [skipNoDimiMatches, setSkipNoDimiMatches] = useState<boolean>(false);
   const [inputPreview, setInputPreview] = useState<string[][]>([]);
   const [inputPreviewJson, setInputPreviewJson] = useState<string | null>(null);
   const [outputPreview, setOutputPreview] = useState<string[][]>([]);
@@ -203,9 +226,51 @@ export default function Home() {
     setOutputPreviewNote("Run a batch request to see the output preview.");
   };
 
+  const clearBatchDimiState = () => {
+    setBatchDimiStatus("idle");
+    setBatchDimiError(null);
+    setBatchDimiProgress(0);
+    setBatchDimiProcessed(0);
+    setBatchDimiTotal(0);
+    setBatchDimiPreparedFile(null);
+    setBatchDimiSkipped(false);
+    setSkipNoDimiMatches(false);
+    setDimiPreviewRows([]);
+    setDimiPreviewJson(null);
+    setDimiPreviewNote("Run DiMi preprocessing to see the output preview.");
+  };
+
   const confirmBatchReset = (message: string) => {
     if (typeof window === "undefined") return true;
     return window.confirm(message);
+  };
+
+  const hasPreparedDimiState = () => {
+    return batchDimiPreparedFile !== null || batchDimiStatus === "done";
+  };
+
+  const handleSkipNoDimiMatchesChange = (nextChecked: boolean) => {
+    if (nextChecked === skipNoDimiMatches) return;
+
+    if (hasBatchResultState()) {
+      const ok = confirmBatchReset(
+        "Changing the skip-instances setting will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+      clearBatchRunState();
+    }
+
+    setSkipNoDimiMatches(nextChecked);
+  };
+
+  const hasBatchResultState = () => {
+    return (
+      batchStatus !== "idle" ||
+      batchDownloadUrl !== null ||
+      outputPreview.length > 0 ||
+      outputPreviewJson !== null ||
+      batchMetrics !== null
+    );
   };
 
   const isDisabled = status === "loading" || text.trim().length === 0;
@@ -247,6 +312,11 @@ export default function Home() {
     setStatus("idle");
     setErrorMessage(null);
     setResult(null);
+    setDimiStatus("idle");
+    setDimiError(null);
+    setDimiResult(null);
+    setDimiCopied({});
+    clearBatchDimiState();
 
     setBatchFile(null);
     setBatchStatus("idle");
@@ -254,6 +324,13 @@ export default function Home() {
     setBatchDownloadUrl(null);
     setBatchOutputFormat(null);
     setBatchLanguage(null);
+    setBatchDimiStatus("idle");
+    setBatchDimiError(null);
+    setBatchDimiProgress(0);
+    setBatchDimiProcessed(0);
+    setBatchDimiTotal(0);
+    setBatchDimiPreparedFile(null);
+    setBatchDimiSkipped(false);
     setBatchFilename(null);
     setBatchMetricsFilename(null);
     setBatchProgress(0);
@@ -279,6 +356,7 @@ export default function Home() {
     setDimiError(null);
     setDimiStatus("loading");
     setDimiResult(null);
+    setDimiCopied({});
 
     try {
       const response = await fetch("http://localhost:8000/lemmatize", {
@@ -371,6 +449,7 @@ export default function Home() {
       clearBatchRunState();
       setBatchOutputFormat(null);
       setBatchLanguage(null);
+      clearBatchDimiState();
     }
 
     setBatchFile(file);
@@ -404,6 +483,7 @@ export default function Home() {
           setInputPreviewJson(null);
           setBatchOutputFormat(null);
           setBatchLanguage(null);
+          clearBatchDimiState();
           setBatchInputLimitError(
             `Too many instances: ${jsonInstanceCount}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
           );
@@ -433,6 +513,7 @@ export default function Home() {
         setInputPreviewJson(null);
         setBatchOutputFormat(null);
         setBatchLanguage(null);
+        clearBatchDimiState();
         setBatchInputLimitError(
           `Too many instances: ${csvInstanceCount}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
         );
@@ -457,6 +538,7 @@ export default function Home() {
     if (nextFormat === batchOutputFormat) return;
 
     const hasDownstreamState =
+      hasPreparedDimiState() ||
       batchStatus !== "idle" ||
       batchDownloadUrl !== null ||
       outputPreview.length > 0 ||
@@ -473,6 +555,7 @@ export default function Home() {
     clearBatchRunState();
     setBatchOutputFormat(nextFormat);
     setBatchLanguage(null);
+    clearBatchDimiState();
   };
 
   const handleBatchLanguageChange = (value: string) => {
@@ -482,6 +565,7 @@ export default function Home() {
     if (!nextLanguage || nextLanguage === batchLanguage) return;
 
     const hasDownstreamState =
+      hasPreparedDimiState() ||
       batchStatus !== "idle" ||
       batchDownloadUrl !== null ||
       outputPreview.length > 0 ||
@@ -497,11 +581,241 @@ export default function Home() {
 
     clearBatchRunState();
     setBatchLanguage(nextLanguage);
+    clearBatchDimiState();
+  };
+
+  const handleBatchDimiSubmit = async () => {
+    if (!batchFile || !batchOutputFormat || !batchLanguage) return;
+
+    if (hasBatchResultState()) {
+      const ok = confirmBatchReset(
+        "Running DiMi preprocessing will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+      clearBatchRunState();
+    }
+
+    setBatchDimiStatus("processing");
+    setBatchDimiError(null);
+    setBatchDimiProgress(0);
+    setBatchDimiProcessed(0);
+    setBatchDimiTotal(0);
+    setBatchDimiPreparedFile(null);
+    setBatchDimiSkipped(false);
+    setDimiPreviewRows([]);
+    setDimiPreviewJson(null);
+    setDimiPreviewNote(null);
+
+    try {
+      const textContent = await batchFile.text();
+      const inputRows = parseBatchInput(textContent, batchFile.name);
+
+      if (inputRows.length === 0) {
+        throw new Error("No text rows were found in the uploaded file.");
+      }
+
+      if (inputRows.length > MAX_BATCH_INSTANCES) {
+        throw new Error(
+          `Too many instances: ${inputRows.length}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
+        );
+      }
+
+      setBatchDimiTotal(inputRows.length);
+
+      const previewRows: DimiPreviewRow[] = [];
+      const augmentedRecords: Array<Record<string, unknown>> = [];
+      for (let index = 0; index < inputRows.length; index += 1) {
+        const inputRow = inputRows[index];
+        const response = await fetch("http://localhost:8000/lemmatize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: inputRow.text,
+            language: batchLanguage,
+          }),
+        });
+
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || "DiMi preprocessing failed");
+        }
+
+        const result = (await response.json()) as LemmatizerResponse;
+        const matchRows = result.matches.length > 0 ? result.matches : [];
+        let dimiCounter = 0;
+
+        if (matchRows.length === 0) {
+          const combinedId = `${inputRow.id}_${dimiCounter}`;
+          const previewRow: DimiPreviewRow = {
+            id: combinedId,
+            full_text: inputRow.text,
+            text: inputRow.text,
+            dimi_matches: 0,
+            dimi_matched_lemmas: [],
+          };
+          previewRows.push(previewRow);
+          augmentedRecords.push({
+            ...inputRow.record,
+            id: combinedId,
+            full_text: inputRow.text,
+            text: inputRow.text,
+            dimi_matches: 0,
+            dimi_matched_lemmas: "",
+            no_dimi_match: skipNoDimiMatches,
+          });
+          if (previewRows.length > MAX_BATCH_INSTANCES) {
+            throw new Error(
+              `Too many DiMi instances: ${previewRows.length}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
+            );
+          }
+        } else {
+          matchRows.forEach((match) => {
+            const contextText = match.context_sentences.join(" ").trim();
+            const combinedId = `${inputRow.id}_${dimiCounter}`;
+            const previewRow: DimiPreviewRow = {
+              id: combinedId,
+              full_text: inputRow.text,
+              text: contextText,
+              dimi_matches: result.matches.length,
+              dimi_matched_lemmas: [...new Set(match.matched_lemmas)],
+            };
+
+            previewRows.push(previewRow);
+            augmentedRecords.push({
+              ...inputRow.record,
+              id: combinedId,
+              full_text: inputRow.text,
+              text: contextText,
+              dimi_matches: result.matches.length,
+              dimi_matched_lemmas: previewRow.dimi_matched_lemmas.join("; "),
+              no_dimi_match: false,
+            });
+            dimiCounter += 1;
+            if (previewRows.length > MAX_BATCH_INSTANCES) {
+              throw new Error(
+                `Too many DiMi instances: ${previewRows.length}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
+              );
+            }
+          });
+        }
+
+        setBatchDimiProcessed(index + 1);
+        setBatchDimiProgress(Math.round(((index + 1) / inputRows.length) * 100));
+      }
+
+      const preparedName = batchFile.name.replace(/\.(csv|json)$/i, "") || "dimi-input";
+      if (batchOutputFormat === "json") {
+        const jsonText = JSON.stringify(augmentedRecords, null, 2);
+        setDimiPreviewRows(previewRows);
+        setDimiPreviewJson(jsonText);
+        setDimiPreviewNote(previewRows.length > 0 ? null : "No DiMi matches found.");
+        setBatchDimiPreparedFile(
+          new File([jsonText], `${preparedName}-dimi.json`, { type: "application/json" })
+        );
+      } else {
+        const csvText = buildCsvText(augmentedRecords);
+        setDimiPreviewRows(previewRows);
+        setDimiPreviewJson(csvText);
+        setDimiPreviewNote(previewRows.length > 0 ? null : "No DiMi matches found.");
+        setBatchDimiPreparedFile(
+          new File([csvText], `${preparedName}-dimi.csv`, { type: "text/csv" })
+        );
+      }
+
+      setBatchDimiStatus("done");
+    } catch (error) {
+      setBatchDimiStatus("error");
+      setBatchDimiError(error instanceof Error ? error.message : "Unexpected error");
+      setBatchDimiPreparedFile(null);
+      setDimiPreviewRows([]);
+      setDimiPreviewJson(null);
+      setDimiPreviewNote("Run DiMi preprocessing to see the output preview.");
+    }
+  };
+
+  const handleSkipBatchDimiSubmit = async () => {
+    if (!batchFile || !batchOutputFormat || !batchLanguage) return;
+
+    if (hasBatchResultState()) {
+      const ok = confirmBatchReset(
+        "Skipping DiMi preprocessing will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+      clearBatchRunState();
+    }
+
+    setBatchDimiError(null);
+    setBatchDimiProgress(0);
+    setBatchDimiProcessed(0);
+    setBatchDimiTotal(0);
+    setBatchDimiPreparedFile(null);
+    setBatchDimiSkipped(true);
+    setDimiPreviewRows([]);
+    setDimiPreviewJson(null);
+    setDimiPreviewNote("DiMi preprocessing skipped.");
+
+    try {
+      const textContent = await batchFile.text();
+      const inputRows = parseBatchInput(textContent, batchFile.name);
+
+      if (inputRows.length === 0) {
+        throw new Error("No text rows were found in the uploaded file.");
+      }
+
+      if (inputRows.length > MAX_BATCH_INSTANCES) {
+        throw new Error(
+          `Too many instances: ${inputRows.length}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
+        );
+      }
+
+      setBatchDimiTotal(inputRows.length);
+
+      const augmentedRecords: Array<Record<string, unknown>> = inputRows.map((inputRow) => ({
+        ...inputRow.record,
+        id: inputRow.id,
+        text: inputRow.text,
+        dimi_matches: 0,
+        no_dimi_match: false,
+      }));
+
+      setBatchDimiProcessed(inputRows.length);
+      setBatchDimiProgress(100);
+
+      const preparedName = batchFile.name.replace(/\.(csv|json)$/i, "") || "dimi-input";
+      if (batchOutputFormat === "json") {
+        const jsonText = JSON.stringify(augmentedRecords, null, 2);
+        setBatchDimiPreparedFile(
+          new File([jsonText], `${preparedName}-dimi.json`, { type: "application/json" })
+        );
+      } else {
+        const csvText = buildCsvText(augmentedRecords);
+        setBatchDimiPreparedFile(
+          new File([csvText], `${preparedName}-dimi.csv`, { type: "text/csv" })
+        );
+      }
+
+      setBatchDimiStatus("done");
+    } catch (error) {
+      setBatchDimiStatus("error");
+      setBatchDimiError(error instanceof Error ? error.message : "Unexpected error");
+      setBatchDimiPreparedFile(null);
+      setDimiPreviewRows([]);
+      setDimiPreviewJson(null);
+      setDimiPreviewNote("Run DiMi preprocessing to see the output preview.");
+    }
   };
 
   const handleBatchSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!batchFile || !batchOutputFormat || !batchLanguage) return;
+    if (!batchFile || !batchOutputFormat || !batchLanguage || !batchDimiPreparedFile) return;
+
+    if (hasBatchResultState()) {
+      const ok = confirmBatchReset(
+        "Running LM detection will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+      clearBatchRunState();
+    }
 
     setBatchStatus("uploading");
     setBatchError(null);
@@ -518,9 +832,10 @@ export default function Home() {
 
     try {
       const formData = new FormData();
-      formData.append("file", batchFile);
+      formData.append("file", batchDimiPreparedFile);
       formData.append("output_format", batchOutputFormat);
       formData.append("language", batchLanguage);
+      formData.append("skip_no_dimi_matches", String(skipNoDimiMatches));
 
       const response = await fetch("http://localhost:8000/batch/start", {
         method: "POST",
@@ -559,7 +874,7 @@ export default function Home() {
             throw new Error(message || "Result request failed");
           }
 
-          const baseName = batchFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
+          const baseName = batchDimiPreparedFile.name.replace(/\.(csv|json)$/i, "") || "predictions";
           const extension = batchOutputFormat === "json" ? "json" : "csv";
           if (statusPayload.metrics) {
             setBatchMetricsFilename(
@@ -656,6 +971,100 @@ export default function Home() {
     return collapsed.slice(0, limit) + "…";
   };
 
+  const stringifyCell = (value: unknown) => {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    return JSON.stringify(value);
+  };
+
+  const escapeCsvCell = (value: string) => {
+    if (/[",\n\r]/.test(value)) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  };
+
+  const buildCsvText = (rows: Array<Record<string, unknown>>) => {
+    const columns = new Set<string>();
+    rows.forEach((row) => {
+      Object.keys(row).forEach((key) => columns.add(key));
+    });
+    const fieldnames = Array.from(columns);
+    if (fieldnames.length === 0) return "";
+
+    const header = fieldnames.join(",");
+    const lines = rows.map((row) =>
+      fieldnames.map((fieldname) => escapeCsvCell(stringifyCell(row[fieldname]))).join(",")
+    );
+    return [header, ...lines].join("\n");
+  };
+
+  const parseBatchInput = (textContent: string, fileName: string) => {
+    const isJson = fileName.toLowerCase().endsWith(".json");
+    if (isJson) {
+      const parsedJson = JSON.parse(textContent) as unknown;
+      const records = Array.isArray(parsedJson)
+        ? parsedJson
+        : parsedJson && typeof parsedJson === "object"
+        ? [parsedJson]
+        : [];
+
+      return records
+        .map((record, index) => {
+          if (!record || typeof record !== "object") return null;
+          const row = record as Record<string, unknown>;
+          const text = stringifyCell(row.text ?? row.content ?? row.body ?? "").trim();
+          if (!text) return null;
+          return {
+            index,
+            record: row,
+            text,
+            id: stringifyCell(row.id ?? index + 1) || String(index + 1),
+          };
+        })
+        .filter((item): item is { index: number; record: Record<string, unknown>; text: string; id: string } => item !== null);
+    }
+
+    const allRows = parseCsvAll(textContent);
+    if (allRows.length === 0) return [];
+
+    const headerRow = allRows[0].map((cell) => cell.trim());
+    const hasHeader = headerRow.some((cell) => cell.toLowerCase() === "text");
+    const startIndex = hasHeader ? 1 : 0;
+    const textColumnIndex = hasHeader
+      ? headerRow.findIndex((cell) => cell.toLowerCase() === "text")
+      : 0;
+    const idColumnIndex = hasHeader
+      ? headerRow.findIndex((cell) => cell.toLowerCase() === "id")
+      : -1;
+
+    return allRows.slice(startIndex).map((row, index) => {
+      const text = stringifyCell(row[textColumnIndex] ?? "").trim();
+      const record: Record<string, unknown> = {};
+      if (hasHeader) {
+        headerRow.forEach((header, headerIndex) => {
+          if (!header) return;
+          record[header] = row[headerIndex] ?? "";
+        });
+      } else {
+        row.forEach((cell, cellIndex) => {
+          record[`column_${cellIndex + 1}`] = cell;
+        });
+      }
+
+      const idValue =
+        hasHeader && idColumnIndex >= 0 ? stringifyCell(row[idColumnIndex]) : String(index + 1);
+
+      return {
+        index,
+        record,
+        text,
+        id: idValue || String(index + 1),
+      };
+    }).filter((item) => item.text.length > 0);
+  };
+
   const renderDimiResults = () => {
     if (!dimiResult) return null;
 
@@ -672,10 +1081,8 @@ export default function Home() {
     return (
       <div className={styles.dimiResults}>
         <p className={`${styles.hint} ${styles.resultLabel}`}>
-          {dimiResult.matches.length} Match
-          {dimiResult.matches.length !== 1 ? "es" : ""} across{" "}
-          {dimiResult.total_sentences} Sentence
-          {dimiResult.total_sentences !== 1 ? "s" : ""}
+          {dimiResult.matches.length} Match{dimiResult.matches.length !== 1 ? "es" : ""} across{" "}
+          {dimiResult.total_sentences} Sentence{dimiResult.total_sentences !== 1 ? "s" : ""}
         </p>
 
         {dimiResult.matches.map((match, i) => (
@@ -689,11 +1096,13 @@ export default function Home() {
                 const copyText = match.context_sentences.join(" ");
                 await navigator.clipboard.writeText(copyText);
                 setDimiCopied((s) => ({ ...(s || {}), [i]: true }));
-                setTimeout(() => setDimiCopied((s) => {
-                  const next = { ...(s || {}) };
-                  delete next[i];
-                  return next;
-                }), 1500);
+                setTimeout(() =>
+                  setDimiCopied((s) => {
+                    const next = { ...(s || {}) };
+                    delete next[i];
+                    return next;
+                  }),
+                1500);
               } catch {
                 // ignore clipboard errors
               }
@@ -722,14 +1131,29 @@ export default function Home() {
                 xmlns="http://www.w3.org/2000/svg"
                 aria-hidden="true"
               >
-                <path d="M16 1H4a2 2 0 0 0-2 2v14" stroke="#0a1823" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <rect x="8" y="4" width="13" height="13" rx="2" stroke="#0a1823" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="#fff8cc"/>
+                <path
+                  d="M16 1H4a2 2 0 0 0-2 2v14"
+                  stroke="#0a1823"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <rect
+                  x="8"
+                  y="4"
+                  width="13"
+                  height="13"
+                  rx="2"
+                  stroke="#0a1823"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="#fff8cc"
+                />
               </svg>
             </span>
 
-            <p className={styles.resultLabel}>
-              Sentence {match.sentence_index + 1}
-            </p>
+            <p className={styles.resultLabel}>Sentence {match.sentence_index + 1}</p>
             <p className={styles.dimiMatchMeta}>
               <span className={styles.resultLabelNormal}>
                 MATCHED LEMMAS: <span className={styles.dimiLemmaList}>{match.matched_lemmas.join(", ")}</span>
@@ -738,8 +1162,7 @@ export default function Home() {
 
             <div className={styles.dimiContext}>
               {match.context_html.map((sentence, j) => {
-                const isCenterSentence =
-                  match.context_sentences[j] === match.center_sentence;
+                const isCenterSentence = match.context_sentences[j] === match.center_sentence;
 
                 return (
                   <span key={j}>
@@ -751,7 +1174,7 @@ export default function Home() {
                     ) : (
                       <span className={styles.dimiContextSentence}>{sentence}</span>
                     )}
-                    {' '}
+                    {" "}
                   </span>
                 );
               })}
@@ -827,9 +1250,7 @@ export default function Home() {
                             dimiLanguage === option.code ? styles.modeTabActive : ""
                           }`}
                           type="button"
-                          onClick={() => {
-                                setDimiLanguage(option.code);
-                              }}
+                          onClick={() => setDimiLanguage(option.code)}
                           aria-pressed={dimiLanguage === option.code}
                           title={option.name}
                         >
@@ -874,7 +1295,7 @@ export default function Home() {
                 <p className={styles.errorMessage}>{dimiError}</p>
               )}
 
-              {dimiResult && renderDimiResults()}
+              {renderDimiResults()}
             </section>
 
             {/* ── LM panel ── */}
@@ -1064,34 +1485,172 @@ export default function Home() {
               )}
 
               {batchFile && batchOutputFormat && batchLanguage && (
-                <div
-                  className={`${styles.batchActions} ${styles.sectionBox} ${styles.fadeInSection}`}
-                >
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <div className={styles.boxHeader}>
+                    <p className={styles.previewTitle}>Run DiMi preprocessing ...</p>
+                  </div>
+                  <div className={styles.progressWrap}>
+                    <div className={styles.dimiActionRow}>
+                      <button
+                        className={`${styles.primaryButton} ${styles.compactButton}`}
+                        type="button"
+                        onClick={() => handleBatchDimiSubmit()}
+                        disabled={
+                          batchDimiStatus === "processing" ||
+                          batchStatus === "uploading" ||
+                          !!batchInputLimitError
+                        }
+                      >
+                        {batchDimiStatus === "processing" ? "Processing..." : "Run DiMi"}
+                      </button>
+                      <button
+                        className={styles.inlineTextButton}
+                        type="button"
+                        onClick={() => handleSkipBatchDimiSubmit()}
+                        disabled={
+                          batchDimiStatus === "processing" ||
+                          batchStatus === "uploading" ||
+                          !!batchInputLimitError
+                        }
+                      >
+                        Skip DiMi preprocessing
+                      </button>
+                    </div>
+                    {batchDimiStatus === "processing" && (
+                      <>
+                        <div className={styles.progressBar}>
+                          <span className={styles.progressFill} />
+                        </div>
+                        <p className={styles.progressText}>
+                          {batchDimiProgress}% ({batchDimiProcessed}/{batchDimiTotal})
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  {batchDimiStatus === "error" && batchDimiError && (
+                    <p className={styles.errorMessage}>{batchDimiError}</p>
+                  )}
+                </div>
+              )}
+
+              {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
+                <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
+                  <p className={styles.previewTitle}>
+                    DiMi preview ({(batchOutputFormat ?? "csv").toUpperCase()})
+                  </p>
+                  {batchOutputFormat === "json" ? (
+                    dimiPreviewJson ? (
+                      <pre className={styles.previewJson}>
+                        {dimiPreviewJson}
+                      </pre>
+                    ) : (
+                      <p className={styles.previewEmpty}>
+                        {dimiPreviewNote || "No DiMi matches found."}
+                      </p>
+                    )
+                  ) : dimiPreviewRows.length > 0 ? (
+                    <div className={styles.previewScroll}>
+                      <table className={styles.previewTable}>
+                        <thead>
+                          <tr>
+                            <th>id</th>
+                            <th>full_text</th>
+                            <th>text</th>
+                            <th>dimi_matches</th>
+                            <th>dimi_matched_lemmas</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dimiPreviewRows.map((row) => (
+                            <tr key={row.id}>
+                              <td>{row.id}</td>
+                              <td>
+                                <div className={styles.cellTruncate} title={row.full_text}>
+                                  {truncateCell(row.full_text)}
+                                </div>
+                              </td>
+                              <td>
+                                <div className={styles.cellTruncate} title={row.text}>
+                                  {truncateCell(row.text)}
+                                </div>
+                              </td>
+                              <td>{row.dimi_matches}</td>
+                              <td>
+                                <div
+                                  className={styles.cellTruncate}
+                                  title={row.dimi_matched_lemmas.join(", ")}
+                                >
+                                  {truncateCell(row.dimi_matched_lemmas.join(", "))}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className={styles.previewEmpty}>
+                      {dimiPreviewNote || "No DiMi matches found."}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>                    
+                  <span className={styles.previewTitle}>
+                    Skip instances with no Dimi Matches; these are also ignored for the metrics calculation
+                  </span>
+                  <label className={styles.checkboxRow}>
+                    <input
+                      className={styles.checkboxInput}
+                      type="checkbox"
+                      checked={skipNoDimiMatches}
+                      onChange={(event) =>
+                        handleSkipNoDimiMatchesChange(event.target.checked)
+                      }
+                    />
+                    <span className={styles.checkboxLabel}>
+                      Skip instances with no DiMi matches
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {batchDimiStatus === "done" && batchDimiPreparedFile && (
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <div className={styles.boxHeader}>
+                    <p className={styles.previewTitle}>Run LM Detection ...</p>
+                  </div>
+
                   <div className={styles.progressWrap}>
                     <button
-                      className={styles.primaryButton}
+                      className={`${styles.primaryButton} ${styles.compactButton}`}
                       type="submit"
                       disabled={
                         !batchFile ||
                         !batchOutputFormat ||
                         !batchLanguage ||
                         batchStatus === "uploading" ||
+                        batchStatus === "processing" ||
                         !!batchInputLimitError
                       }
                     >
                       {batchStatus === "uploading" || batchStatus === "processing"
                         ? "Processing..."
-                        : "Run batch"}
+                        : "Run LM Detection"}
                     </button>
+
                     {(batchStatus === "uploading" || batchStatus === "processing") && (
-                      <div className={styles.progressBar}>
-                        <span className={styles.progressFill} />
-                      </div>
-                    )}
-                    {batchStatus === "processing" && (
-                      <p className={styles.progressText}>
-                        {batchProgress}% ({batchProcessed}/{batchTotal})
-                      </p>
+                      <>
+                        <div className={styles.progressBar}>
+                          <span className={styles.progressFill} />
+                        </div>
+
+                        <p className={styles.progressText}>
+                          {batchProgress}% ({batchProcessed}/{batchTotal})
+                        </p>
+                      </>
                     )}
                   </div>
                 </div>

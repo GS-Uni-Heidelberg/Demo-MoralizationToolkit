@@ -94,6 +94,8 @@ class BatchJob:
         ids: list[str],
         extras: list[dict[str, object]],
         extra_fieldnames: list[str],
+        dimi_matches: list[int],
+        skip_no_dimi_matches: bool,
     ) -> None:
         self.job_id = job_id
         self.output_format = output_format
@@ -102,6 +104,8 @@ class BatchJob:
         self.ids = ids
         self.extras = extras
         self.extra_fieldnames = extra_fieldnames
+        self.dimi_matches = dimi_matches
+        self.skip_no_dimi_matches = skip_no_dimi_matches
         self.total = len(texts)
         self.processed = 0
         self.status = "queued"
@@ -373,9 +377,26 @@ def parse_label(value: object) -> int:
     raise ValueError(f"Invalid label value: {value}")
 
 
+def parse_bool_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
 def parse_csv_texts(
     raw_bytes: bytes,
-) -> tuple[list[str], list[int] | None, list[str], list[dict[str, object]], list[str]]:
+) -> tuple[
+    list[str],
+    list[int] | None,
+    list[str],
+    list[dict[str, object]],
+    list[str],
+    list[int],
+]:
     content = raw_bytes.decode("utf-8", errors="ignore")
     reader = csv.DictReader(io.StringIO(content))
     texts: list[str] = []
@@ -383,6 +404,7 @@ def parse_csv_texts(
     ids: list[str] = []
     extras: list[dict[str, object]] = []
     extra_fieldnames: list[str] = []
+    dimi_matches: list[int] = []
 
     if reader.fieldnames:
         normalized = [name.strip().lower() for name in reader.fieldnames]
@@ -398,10 +420,28 @@ def parse_csv_texts(
             (reader.fieldnames[idx] for idx, name in enumerate(normalized) if name == "id"),
             None,
         )
+        no_dimi_field = next(
+            (
+                reader.fieldnames[idx]
+                for idx, name in enumerate(normalized)
+                if name == "no_dimi_match"
+            ),
+            None,
+        )
+        dimi_matches_field = next(
+            (
+                reader.fieldnames[idx]
+                for idx, name in enumerate(normalized)
+                if name == "dimi_matches"
+            ),
+            None,
+        )
     else:
         text_field = None
         label_field = None
         id_field = None
+        no_dimi_field = None
+        dimi_matches_field = None
 
     if text_field:
         excluded_fields = {text_field}
@@ -409,6 +449,10 @@ def parse_csv_texts(
             excluded_fields.add(label_field)
         if id_field:
             excluded_fields.add(id_field)
+        if no_dimi_field:
+            excluded_fields.add(no_dimi_field)
+        if dimi_matches_field:
+            excluded_fields.add(dimi_matches_field)
 
         if reader.fieldnames:
             extra_fieldnames = [name for name in reader.fieldnames if name not in excluded_fields]
@@ -420,6 +464,16 @@ def parse_csv_texts(
                 if id_field:
                     ids.append(str(row.get(id_field, "")).strip())
                 extras.append({name: row.get(name, "") for name in extra_fieldnames})
+                dimi_matches_value = 0
+                if dimi_matches_field:
+                    raw_dimi_matches = row.get(dimi_matches_field, 0)
+                    try:
+                        dimi_matches_value = int(str(raw_dimi_matches).strip() or "0")
+                    except ValueError:
+                        dimi_matches_value = 0
+                elif no_dimi_field and parse_bool_flag(row.get(no_dimi_field, False)):
+                    dimi_matches_value = 0
+                dimi_matches.append(dimi_matches_value)
             if label_field:
                 raw_label = row.get(label_field, "")
                 if raw_label in {None, ""}:
@@ -427,7 +481,7 @@ def parse_csv_texts(
                 labels.append(parse_label(raw_label))
         if not id_field:
             ids = [str(index) for index in range(1, len(texts) + 1)]
-        return texts, labels if label_field else None, ids, extras, extra_fieldnames
+        return texts, labels if label_field else None, ids, extras, extra_fieldnames, dimi_matches
 
     fallback_reader = csv.reader(io.StringIO(content))
     for row in fallback_reader:
@@ -438,12 +492,20 @@ def parse_csv_texts(
             texts.append(text)
     ids = [str(index) for index in range(1, len(texts) + 1)]
     extras = [{} for _ in texts]
-    return texts, None, ids, extras, []
+    dimi_matches = [0 for _ in texts]
+    return texts, None, ids, extras, [], dimi_matches
 
 
 def parse_json_texts(
     raw_bytes: bytes,
-) -> tuple[list[str], list[int] | None, list[str], list[dict[str, object]], list[str]]:
+) -> tuple[
+    list[str],
+    list[int] | None,
+    list[str],
+    list[dict[str, object]],
+    list[str],
+    list[int],
+]:
     content = raw_bytes.decode("utf-8", errors="ignore")
     payload = json.loads(content)
     texts: list[str] = []
@@ -451,6 +513,7 @@ def parse_json_texts(
     ids: list[str | None] = []
     extras: list[dict[str, object]] = []
     extra_fieldnames: list[str] = []
+    dimi_matches: list[int] = []
 
     if not isinstance(payload, list):
         raise ValueError("JSON must be a list of objects with a text field.")
@@ -467,12 +530,17 @@ def parse_json_texts(
             extra_item = {
                 key: value
                 for key, value in item.items()
-                if key not in {"text", "label", "id"}
+                if key not in {"text", "label", "id", "no_dimi_match", "dimi_matches"}
             }
             extras.append(extra_item)
             for key in extra_item.keys():
                 if key not in extra_fieldnames:
                     extra_fieldnames.append(key)
+            raw_dimi_matches = item.get("dimi_matches", 0)
+            try:
+                dimi_matches.append(int(str(raw_dimi_matches).strip() or "0"))
+            except ValueError:
+                dimi_matches.append(0)
         if "label" in item:
             label_present = True
             labels.append(parse_label(item.get("label")))
@@ -489,7 +557,17 @@ def parse_json_texts(
     for index, value in enumerate(ids, start=1):
         resolved_ids.append(value if value else str(index))
 
-    return texts, labels if label_present else None, resolved_ids, extras, extra_fieldnames
+    if len(dimi_matches) != len(texts):
+        dimi_matches = [0 for _ in texts]
+
+    return (
+        texts,
+        labels if label_present else None,
+        resolved_ids,
+        extras,
+        extra_fieldnames,
+        dimi_matches,
+    )
 
 
 def label_to_binary(label: str) -> int:
@@ -530,18 +608,39 @@ def compute_metrics(true_labels: list[int], predicted_labels: list[int]) -> dict
 def run_batch_job(job: BatchJob) -> None:
     job.status = "running"
     results = []
-    predicted_binary: list[int] = []
-    reserved_fields = {"id", "text", "label", "prediction", "confidence"}
+    metric_true_labels: list[int] = []
+    metric_predicted_labels: list[int] = []
+    reserved_fields = {
+        "id",
+        "text",
+        "label",
+        "prediction",
+        "confidence",
+        "full_text",
+        "dimi_matched_lemmas",
+        "dimi_matches",
+        "no_dimi_match",
+    }
     output_extra_fieldnames = [
         name for name in job.extra_fieldnames if name not in reserved_fields
     ]
 
     for index, text in enumerate(job.texts, start=1):
-        prediction = MODEL.predict(text)
-        predicted_binary.append(label_to_binary(prediction.label))
-        confidence_str = f"{prediction.confidence:.4f}"
+        dimi_match_count = job.dimi_matches[index - 1] if index - 1 < len(job.dimi_matches) else 0
+        skip_no_dimi = job.skip_no_dimi_matches and dimi_match_count == 0
+        prediction_label = "no_dimi"
+        confidence_str: str | None = None
+
+        if not skip_no_dimi:
+            prediction = MODEL.predict(text)
+            prediction_label = prediction.label
+            confidence_str = f"{prediction.confidence:.4f}"
+            if job.labels:
+                metric_true_labels.append(job.labels[index - 1])
+                metric_predicted_labels.append(label_to_binary(prediction.label))
+
+        input_extras = job.extras[index - 1]
         result_item: dict[str, object] = {
-            **job.extras[index - 1],
             "id": job.ids[index - 1],
             "text": text,
         }
@@ -549,31 +648,49 @@ def run_batch_job(job: BatchJob) -> None:
             result_item["label"] = (
                 "moralization" if job.labels[index - 1] == 1 else "no_moralization"
             )
-        result_item["prediction"] = prediction.label
+        result_item["prediction"] = prediction_label
         result_item["confidence"] = confidence_str
+
+        if "full_text" in input_extras:
+            result_item["full_text"] = input_extras.get("full_text", text)
+        if "dimi_matched_lemmas" in input_extras:
+            result_item["dimi_matched_lemmas"] = input_extras.get("dimi_matched_lemmas", "")
+
+        for fieldname in output_extra_fieldnames:
+            result_item[fieldname] = input_extras.get(fieldname, "")
+
         results.append(result_item)
         job.processed = index
 
-    if job.labels:
-        for idx, item in enumerate(results):
-            item["label"] = "moralization" if job.labels[idx] == 1 else "no_moralization"
-        job.metrics = compute_metrics(job.labels, predicted_binary)
+    if job.labels and metric_true_labels:
+        job.metrics = compute_metrics(metric_true_labels, metric_predicted_labels)
+    elif job.labels:
+        job.metrics = None
 
     if job.output_format == "json":
         job.result_json = {"results": results}
     else:
         output = io.StringIO()
-        fieldnames = ["id", "text", "prediction", "confidence", *output_extra_fieldnames]
         if job.labels:
-            fieldnames = [
-                "id",
-                "text",
-                "label",
-                "prediction",
-                "confidence",
-                *output_extra_fieldnames,
-            ]
-        writer = csv.DictWriter(output, fieldnames=fieldnames)
+            fieldnames = ["id", "text", "label", "prediction", "confidence"]
+            if "full_text" in job.extra_fieldnames:
+                fieldnames.append("full_text")
+            if "dimi_matched_lemmas" in job.extra_fieldnames:
+                fieldnames.append("dimi_matched_lemmas")
+            fieldnames.extend(output_extra_fieldnames)
+        else:
+            fieldnames = ["id", "text", "prediction", "confidence"]
+            if "full_text" in job.extra_fieldnames:
+                fieldnames.append("full_text")
+            if "dimi_matched_lemmas" in job.extra_fieldnames:
+                fieldnames.append("dimi_matched_lemmas")
+            fieldnames.extend(output_extra_fieldnames)
+
+        deduped_fieldnames: list[str] = []
+        for fieldname in fieldnames:
+            if fieldname not in deduped_fieldnames:
+                deduped_fieldnames.append(fieldname)
+        writer = csv.DictWriter(output, fieldnames=deduped_fieldnames)
         writer.writeheader()
         writer.writerows(results)
         job.result_bytes = output.getvalue().encode("utf-8")
@@ -625,6 +742,7 @@ async def predict(request: PredictRequest) -> PredictResponse:
 async def batch_start(
     file: UploadFile = File(...),
     output_format: str = Form("csv"),
+    skip_no_dimi_matches: str = Form("false"),
 ) -> dict[str, str]:
     if MODEL_ERROR or MODEL is None:
         raise HTTPException(status_code=500, detail="Model failed to load")
@@ -638,9 +756,9 @@ async def batch_start(
 
     try:
         if filename.endswith(".csv") or content_type in {"text/csv", "application/csv"}:
-            texts, labels, ids, extras, extra_fieldnames = parse_csv_texts(raw_bytes)
+            texts, labels, ids, extras, extra_fieldnames, dimi_matches = parse_csv_texts(raw_bytes)
         elif filename.endswith(".json") or content_type in {"application/json", "text/json"}:
-            texts, labels, ids, extras, extra_fieldnames = parse_json_texts(raw_bytes)
+            texts, labels, ids, extras, extra_fieldnames, dimi_matches = parse_json_texts(raw_bytes)
         else:
             raise HTTPException(
                 status_code=400,
@@ -655,6 +773,8 @@ async def batch_start(
     if fmt not in {"csv", "json"}:
         raise HTTPException(status_code=400, detail="Unsupported output format")
 
+    skip_flag = parse_bool_flag(skip_no_dimi_matches)
+
     job_id = str(uuid.uuid4())
     job = BatchJob(
         job_id=job_id,
@@ -664,6 +784,8 @@ async def batch_start(
         ids=ids,
         extras=extras,
         extra_fieldnames=extra_fieldnames,
+        dimi_matches=dimi_matches,
+        skip_no_dimi_matches=skip_flag,
     )
     with JOB_LOCK:
         JOBS[job_id] = job

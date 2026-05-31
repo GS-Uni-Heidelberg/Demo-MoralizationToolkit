@@ -136,6 +136,11 @@
   box-shadow: 0 16px 28px rgba(10, 24, 35, 0.3);
 }
 
+.compactButton {
+  width: fit-content;
+  align-self: flex-start;
+}
+
 .dangerButton {
   border: none;
   border-radius: 999px;
@@ -331,6 +336,25 @@
   gap: 12px;
 }
 
+.checkboxRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink-700);
+}
+
+.checkboxInput {
+  width: 16px;
+  height: 16px;
+  accent-color: #0a1823;
+}
+
+.checkboxLabel {
+  line-height: 1.4;
+}
+
 .selectLabel {
   font-family: var(--font-sans);
   font-size: 14px;
@@ -410,6 +434,31 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.dimiActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.inlineTextButton {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: #1b4d6a;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inlineTextButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  text-decoration: none;
 }
 
 .progressBar {
@@ -678,6 +727,18 @@
   overflow: hidden;
 }
 
+.previewTable th {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(10, 24, 35, 0.12);
+  vertical-align: top;
+  min-width: 180px;
+  width: 180px;
+  max-width: 260px;
+  overflow: hidden;
+  text-align: left;
+  font-weight: 600;
+}
+
 /* Enforce single-line truncation for cell content */
 .previewTable td > .cellTruncate {
   display: block;
@@ -705,6 +766,11 @@
 .previewDark .previewTable td {
   color: #f9f4ec;
   border-bottom-color: rgba(249, 244, 236, 0.15);
+}
+
+.previewDark .previewTable th {
+  color: #f9f4ec;
+  border-bottom-color: rgba(249, 244, 236, 0.2);
 }
 
 .previewDark .previewJson {
