@@ -1658,7 +1658,7 @@ export default function Home() {
                 </div>
               )}
 
-              {batchDimiStatus === "done" && batchDimiPreparedFile && (
+              {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
                 <div className={`${styles.downloadSection} ${styles.fadeInSection}`}>
                   <div className={styles.downloadLinks}>
                     <button
