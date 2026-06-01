@@ -704,7 +704,6 @@ export default function Home() {
                   fullText: inputRow.text,
                   dimiMatches: 0,
                   dimiMatchedLemmas: "",
-                  noDimiMatch: skipNoDimiMatches ?? false,
                 })
               );
             } else {
@@ -727,7 +726,6 @@ export default function Home() {
                     fullText: inputRow.text,
                     dimiMatches: result.matches.length,
                     dimiMatchedLemmas: previewRow.dimi_matched_lemmas.join("; "),
-                    noDimiMatch: false,
                   })
                 );
                 dimiCounter += 1;
@@ -836,7 +834,6 @@ export default function Home() {
           fullText: inputRow.text,
           dimiMatches: 0,
           dimiMatchedLemmas: "",
-          noDimiMatch: false,
         })
       );
 
@@ -1063,7 +1060,6 @@ export default function Home() {
       fullText: string;
       dimiMatches: number;
       dimiMatchedLemmas: string;
-      noDimiMatch: boolean;
     }
   ) => {
     const reservedKeys = new Set([
@@ -1073,7 +1069,6 @@ export default function Home() {
       "label",
       "dimi_matches",
       "dimi_matched_lemmas",
-      "no_dimi_match",
     ]);
 
     const preparedRecord: Record<string, unknown> = {
@@ -1082,7 +1077,6 @@ export default function Home() {
       full_text: values.fullText,
       dimi_matches: values.dimiMatches,
       dimi_matched_lemmas: values.dimiMatchedLemmas,
-      no_dimi_match: values.noDimiMatch,
     };
 
     if (Object.prototype.hasOwnProperty.call(inputRecord, "label")) {
