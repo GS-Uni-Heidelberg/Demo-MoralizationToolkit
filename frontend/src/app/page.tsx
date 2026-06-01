@@ -161,11 +161,7 @@ export default function Home() {
 
   // Single-text moralization state
   const [text, setText] = useState(DEFAULT_TEXT);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    if (typeof window === "undefined") return "single";
-    const stored = sessionStorage.getItem("viewMode") as ViewMode | null;
-    return stored === "single" || stored === "batch" ? stored : "single";
-  });
+  const [viewMode, setViewMode] = useState<ViewMode>("single");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
@@ -300,6 +296,13 @@ export default function Home() {
   }, [batchDownloadUrl]);
 
   useEffect(() => {
+    const stored = sessionStorage.getItem("viewMode") as ViewMode | null;
+    if (stored === "single" || stored === "batch") {
+      setViewMode(stored);
+    }
+  }, []);
+
+  useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (!hasUnsavedData) return;
       event.preventDefault();
@@ -315,7 +318,8 @@ export default function Home() {
     );
     if (!ok) return;
 
-    sessionStorage.setItem("viewMode", "single");
+    sessionStorage.setItem("viewMode", "batch");
+    setViewMode("batch");
     setText(INITIAL_TEXT);
     setStatus("idle");
     setErrorMessage(null);
