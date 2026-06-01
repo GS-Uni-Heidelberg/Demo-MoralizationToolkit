@@ -149,3 +149,20 @@
   border-top: 1px solid #e2e8f0;
   color: #0f172a;
 }
+
+.info {
+  font-size: 12px;
+  display: block;
+  padding: 8px;
+  white-space: normal;
+}
+
+.link {
+  color: #2563eb;   /* blue */
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.link:hover {
+  color: #1d4ed8;
+}

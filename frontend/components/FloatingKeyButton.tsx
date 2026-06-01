@@ -3,17 +3,70 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./FloatingKeyPanel.module.css";
 
+const DEFAULT_COINS = 5;
+const REFILL_TIME = 24 * 60 * 60 * 1000; // 24h
+
 export default function FloatingKeyPanel() {
   const [open, setOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
-  const [coins, setCoins] = useState(0); // demo value
+  const [coins, setCoins] = useState<number>(0);
+
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
-  // load saved key
+  // Load API key + coins + refill logic
   useEffect(() => {
-    const saved = localStorage.getItem("apiKey");
-    if (saved) setApiKey(saved);
+    const savedKey = localStorage.getItem("apiKey");
+    const savedCoins = localStorage.getItem("coins");
+    const lastRefill = localStorage.getItem("lastRefill");
+
+    if (savedKey) {
+      setApiKey(savedKey);
+      setCoins(999); // “unlimited” mode for API users (adjust later if backend exists)
+      return;
+    }
+
+    const now = Date.now();
+
+    if (!savedCoins || !lastRefill) {
+      // first visit (no key)
+      setCoins(DEFAULT_COINS);
+      localStorage.setItem("coins", String(DEFAULT_COINS));
+      localStorage.setItem("lastRefill", String(now));
+      return;
+    }
+
+    const elapsed = now - Number(lastRefill);
+
+    if (elapsed >= REFILL_TIME) {
+      setCoins(DEFAULT_COINS);
+      localStorage.setItem("coins", String(DEFAULT_COINS));
+      localStorage.setItem("lastRefill", String(now));
+    } else {
+      setCoins(Number(savedCoins));
+    }
   }, []);
+
+  // Persist coins (only in demo mode)
+  useEffect(() => {
+    if (!apiKey) {
+      localStorage.setItem("coins", String(coins));
+    }
+  }, [coins, apiKey]);
+
+  // Auto refill when coins hit 0
+  useEffect(() => {
+    if (apiKey) return;
+    if (coins !== 0) return;
+
+    const timer = setTimeout(() => {
+      const now = Date.now();
+      setCoins(DEFAULT_COINS);
+      localStorage.setItem("coins", String(DEFAULT_COINS));
+      localStorage.setItem("lastRefill", String(now));
+    }, REFILL_TIME);
+
+    return () => clearTimeout(timer);
+  }, [coins, apiKey]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -29,6 +82,13 @@ export default function FloatingKeyPanel() {
 
   const saveKey = () => {
     localStorage.setItem("apiKey", apiKey);
+
+    if (apiKey.trim().length > 0) {
+      setCoins(999); // switch to “pro mode”
+    } else {
+      setCoins(DEFAULT_COINS);
+    }
+
     setOpen(false);
   };
 
@@ -53,6 +113,14 @@ export default function FloatingKeyPanel() {
             ✕
           </button>
         </div>
+        <span className={styles.info}>
+          Don't have a key and your coins are empty? <br /> 
+          Contact us via {" "}
+          <a href="mailto:support@moralizer.ai" className={styles.link}>
+            email{" "}
+          </a>
+          to get one or wait 24h for your coins to refill automatically.
+        </span>
 
         <div className={styles.body}>
 
