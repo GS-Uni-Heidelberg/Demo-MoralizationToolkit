@@ -631,107 +631,149 @@ export default function Home() {
 
       setBatchDimiTotal(inputRows.length);
 
-      const previewRows: DimiPreviewRow[] = [];
-      const augmentedRecords: Array<Record<string, unknown>> = [];
-      for (let index = 0; index < inputRows.length; index += 1) {
-        const inputRow = inputRows[index];
-        const response = await fetch("http://localhost:8000/lemmatize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: inputRow.text,
-            language: batchLanguage,
-          }),
-        });
+      const startResponse = await fetch("http://localhost:8000/lemmatize/batch/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          texts: inputRows.map((row) => row.text),
+          language: batchLanguage,
+        }),
+      });
 
-        if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "DiMi preprocessing failed");
+      if (!startResponse.ok) {
+        const message = await startResponse.text();
+        throw new Error(message || "DiMi preprocessing failed");
+      }
+
+      const startPayload = (await startResponse.json()) as { job_id: string };
+
+      const pollStatus = async () => {
+        const statusResponse = await fetch(
+          `http://localhost:8000/lemmatize/batch/status/${startPayload.job_id}`
+        );
+        if (!statusResponse.ok) {
+          const message = await statusResponse.text();
+          throw new Error(message || "DiMi status request failed");
         }
 
-        const result = (await response.json()) as LemmatizerResponse;
-        const matchRows = result.matches.length > 0 ? result.matches : [];
-        let dimiCounter = 0;
+        const statusPayload = (await statusResponse.json()) as BatchStatusResponse;
+        setBatchDimiProcessed(statusPayload.processed);
+        setBatchDimiProgress(statusPayload.progress);
 
-        if (matchRows.length === 0) {
-          const combinedId = `${inputRow.id}_${dimiCounter}`;
-          const previewRow: DimiPreviewRow = {
-            id: combinedId,
-            full_text: inputRow.text,
-            text: inputRow.text,
-            dimi_matches: 0,
-            dimi_matched_lemmas: [],
-          };
-          previewRows.push(previewRow);
-          augmentedRecords.push({
-            ...inputRow.record,
-            id: combinedId,
-            full_text: inputRow.text,
-            text: inputRow.text,
-            dimi_matches: 0,
-            dimi_matched_lemmas: "",
-            no_dimi_match: skipNoDimiMatches,
+        if (statusPayload.status === "completed") {
+          const resultResponse = await fetch(
+            `http://localhost:8000/lemmatize/batch/result/${startPayload.job_id}`
+          );
+          if (!resultResponse.ok) {
+            const message = await resultResponse.text();
+            throw new Error(message || "DiMi result request failed");
+          }
+
+          const results = (await resultResponse.json()) as LemmatizerResponse[];
+          if (results.length !== inputRows.length) {
+            throw new Error("DiMi preprocessing returned unexpected batch size.");
+          }
+
+          const previewRows: DimiPreviewRow[] = [];
+          const augmentedRecords: Array<Record<string, unknown>> = [];
+
+          results.forEach((result, index) => {
+            const inputRow = inputRows[index];
+            const matchRows = result.matches.length > 0 ? result.matches : [];
+            let dimiCounter = 0;
+
+            if (matchRows.length === 0) {
+              const combinedId = `${inputRow.id}_${dimiCounter}`;
+              const previewRow: DimiPreviewRow = {
+                id: combinedId,
+                full_text: inputRow.text,
+                text: inputRow.text,
+                dimi_matches: 0,
+                dimi_matched_lemmas: [],
+              };
+              previewRows.push(previewRow);
+              augmentedRecords.push({
+                ...inputRow.record,
+                id: combinedId,
+                full_text: inputRow.text,
+                text: inputRow.text,
+                dimi_matches: 0,
+                dimi_matched_lemmas: "",
+                no_dimi_match: skipNoDimiMatches,
+              });
+            } else {
+              matchRows.forEach((match) => {
+                const contextText = match.context_sentences.join(" ").trim();
+                const combinedId = `${inputRow.id}_${dimiCounter}`;
+                const previewRow: DimiPreviewRow = {
+                  id: combinedId,
+                  full_text: inputRow.text,
+                  text: contextText,
+                  dimi_matches: result.matches.length,
+                  dimi_matched_lemmas: [...new Set(match.matched_lemmas)],
+                };
+
+                previewRows.push(previewRow);
+                augmentedRecords.push({
+                  ...inputRow.record,
+                  id: combinedId,
+                  full_text: inputRow.text,
+                  text: contextText,
+                  dimi_matches: result.matches.length,
+                  dimi_matched_lemmas: previewRow.dimi_matched_lemmas.join("; "),
+                  no_dimi_match: false,
+                });
+                dimiCounter += 1;
+              });
+            }
           });
+
           if (previewRows.length > MAX_BATCH_INSTANCES) {
             throw new Error(
               `Too many DiMi instances: ${previewRows.length}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
             );
           }
-        } else {
-          matchRows.forEach((match) => {
-            const contextText = match.context_sentences.join(" ").trim();
-            const combinedId = `${inputRow.id}_${dimiCounter}`;
-            const previewRow: DimiPreviewRow = {
-              id: combinedId,
-              full_text: inputRow.text,
-              text: contextText,
-              dimi_matches: result.matches.length,
-              dimi_matched_lemmas: [...new Set(match.matched_lemmas)],
-            };
 
-            previewRows.push(previewRow);
-            augmentedRecords.push({
-              ...inputRow.record,
-              id: combinedId,
-              full_text: inputRow.text,
-              text: contextText,
-              dimi_matches: result.matches.length,
-              dimi_matched_lemmas: previewRow.dimi_matched_lemmas.join("; "),
-              no_dimi_match: false,
-            });
-            dimiCounter += 1;
-            if (previewRows.length > MAX_BATCH_INSTANCES) {
-              throw new Error(
-                `Too many DiMi instances: ${previewRows.length}. Maximum allowed is ${MAX_BATCH_INSTANCES}.`
-              );
-            }
-          });
+          const preparedName = batchFile.name.replace(/\.(csv|json)$/i, "") || "dimi-input";
+          if (batchOutputFormat === "json") {
+            const jsonText = JSON.stringify(augmentedRecords, null, 2);
+            setDimiPreviewRows(previewRows);
+            setDimiPreviewJson(jsonText);
+            setDimiPreviewNote(previewRows.length > 0 ? null : "No DiMi matches found.");
+            setBatchDimiPreparedFile(
+              new File([jsonText], `${preparedName}-dimi.json`, { type: "application/json" })
+            );
+          } else {
+            const csvText = buildCsvText(augmentedRecords);
+            setDimiPreviewRows(previewRows);
+            setDimiPreviewJson(csvText);
+            setDimiPreviewNote(previewRows.length > 0 ? null : "No DiMi matches found.");
+            setBatchDimiPreparedFile(
+              new File([csvText], `${preparedName}-dimi.csv`, { type: "text/csv" })
+            );
+          }
+
+          setBatchDimiStatus("done");
+          return true;
         }
 
-        setBatchDimiProcessed(index + 1);
-        setBatchDimiProgress(Math.round(((index + 1) / inputRows.length) * 100));
-      }
+        if (statusPayload.status === "failed") {
+          throw new Error(statusPayload.error || "DiMi preprocessing failed");
+        }
 
-      const preparedName = batchFile.name.replace(/\.(csv|json)$/i, "") || "dimi-input";
-      if (batchOutputFormat === "json") {
-        const jsonText = JSON.stringify(augmentedRecords, null, 2);
-        setDimiPreviewRows(previewRows);
-        setDimiPreviewJson(jsonText);
-        setDimiPreviewNote(previewRows.length > 0 ? null : "No DiMi matches found.");
-        setBatchDimiPreparedFile(
-          new File([jsonText], `${preparedName}-dimi.json`, { type: "application/json" })
-        );
-      } else {
-        const csvText = buildCsvText(augmentedRecords);
-        setDimiPreviewRows(previewRows);
-        setDimiPreviewJson(csvText);
-        setDimiPreviewNote(previewRows.length > 0 ? null : "No DiMi matches found.");
-        setBatchDimiPreparedFile(
-          new File([csvText], `${preparedName}-dimi.csv`, { type: "text/csv" })
-        );
-      }
+        return false;
+      };
 
-      setBatchDimiStatus("done");
+      const pollLoop = async () => {
+        let completed = false;
+        while (!completed) {
+          completed = await pollStatus();
+          if (!completed) await new Promise((resolve) => setTimeout(resolve, 600));
+        }
+      };
+
+      await pollLoop();
+
     } catch (error) {
       setBatchDimiStatus("error");
       setBatchDimiError(error instanceof Error ? error.message : "Unexpected error");

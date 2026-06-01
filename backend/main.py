@@ -9,6 +9,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import openpyxl
 import stanza
@@ -116,8 +117,27 @@ class BatchJob:
         self.result_json: dict[str, object] | None = None
 
 
+class LemmaBatchJob:
+    def __init__(
+        self,
+        job_id: str,
+        texts: list[str],
+        language: str,
+    ) -> None:
+        self.job_id = job_id
+        self.texts = texts
+        self.language = language
+        self.total = len(texts)
+        self.processed = 0
+        self.status = "queued"
+        self.error: str | None = None
+        self.result_json: list[dict] | None = None
+
+
 JOBS: dict[str, BatchJob] = {}
 JOB_LOCK = threading.Lock()
+LEMMA_JOBS: dict[str, LemmaBatchJob] = {}
+LEMMA_JOB_LOCK = threading.Lock()
 
 
 # ── MORALIZATION MODEL BUNDLE ─────────────────────────────────────────────────
@@ -273,36 +293,13 @@ class LemmatizerBundle:
         )
         return pattern.sub(r"<mark>\1</mark>", sentence_text)
 
-    # ── public ─────────────────────────────────────────────────────────────
-
-    def find_lemmas(
+    def _find_lemmas_with_pipeline(
         self,
         text: str,
-        language: str,
+        dict_set: set[str],
+        pipeline: stanza.Pipeline,
     ) -> LemmatizerResponse:
-        """
-        Lemmatise *text* and return every sentence whose tokens include a lemma
-        from the pre-loaded dictionary for *language*, together with ±2 sentences
-        of context.
-
-        Parameters
-        ----------
-        text:
-            Raw input text.
-        language:
-            ISO 639-1 code (e.g. ``"de"``, ``"en"``). A lemma file for this
-            language must exist in ``LEMMAS_DIR``.
-        """
-        if language not in LEMMA_CACHE:
-            raise ValueError(
-                f"No lemma file found for language '{language}'. "
-                f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
-            )
-        dict_set = set(LEMMA_CACHE[language])  # already lowercased
-
-        with self._lock:
-            pipeline = self._get_pipeline(language)
-            doc = pipeline(text)
+        doc = pipeline(text)
 
         sentences = doc.sentences
         total = len(sentences)
@@ -358,6 +355,57 @@ class LemmatizerBundle:
             ],
             total_sentences=total,
         )
+
+    # ── public ─────────────────────────────────────────────────────────────
+
+    def find_lemmas(
+        self,
+        text: str,
+        language: str,
+    ) -> LemmatizerResponse:
+        """
+        Lemmatise *text* and return every sentence whose tokens include a lemma
+        from the pre-loaded dictionary for *language*, together with ±2 sentences
+        of context.
+
+        Parameters
+        ----------
+        text:
+            Raw input text.
+        language:
+            ISO 639-1 code (e.g. ``"de"``, ``"en"``). A lemma file for this
+            language must exist in ``LEMMAS_DIR``.
+        """
+        if language not in LEMMA_CACHE:
+            raise ValueError(
+                f"No lemma file found for language '{language}'. "
+                f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
+            )
+        dict_set = set(LEMMA_CACHE[language])  # already lowercased
+        with self._lock:
+            pipeline = self._get_pipeline(language)
+            return self._find_lemmas_with_pipeline(text, dict_set, pipeline)
+
+    def find_lemmas_batch(
+        self,
+        texts: list[str],
+        language: str,
+        on_progress: Callable[[int], None] | None = None,
+    ) -> list[LemmatizerResponse]:
+        if language not in LEMMA_CACHE:
+            raise ValueError(
+                f"No lemma file found for language '{language}'. "
+                f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
+            )
+        dict_set = set(LEMMA_CACHE[language])  # already lowercased
+        with self._lock:
+            pipeline = self._get_pipeline(language)
+            results: list[LemmatizerResponse] = []
+            for index, text in enumerate(texts, start=1):
+                results.append(self._find_lemmas_with_pipeline(text, dict_set, pipeline))
+                if on_progress:
+                    on_progress(index)
+            return results
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -709,6 +757,25 @@ def run_batch_job(job: BatchJob) -> None:
     job.status = "completed"
 
 
+def run_lemma_batch_job(job: LemmaBatchJob) -> None:
+    job.status = "running"
+
+    def _update_progress(value: int) -> None:
+        job.processed = value
+
+    try:
+        results = LEMMATIZER.find_lemmas_batch(
+            texts=job.texts,
+            language=job.language,
+            on_progress=_update_progress,
+        )
+        job.result_json = [result.dict() for result in results]
+        job.status = "completed"
+    except Exception as exc:
+        job.error = str(exc)
+        job.status = "failed"
+
+
 # ── SINGLETONS ────────────────────────────────────────────────────────────────
 
 try:
@@ -903,13 +970,68 @@ async def lemmatize_batch(request: LemmaBatchRequest) -> list[dict]:
 
     try:
         return [
-            LEMMATIZER.find_lemmas(
-                text=text,
+            result.dict()
+            for result in LEMMATIZER.find_lemmas_batch(
+                texts=request.texts,
                 language=request.language,
-            ).dict()
-            for text in request.texts
+            )
         ]
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/lemmatize/batch/start")
+async def lemmatize_batch_start(request: LemmaBatchRequest) -> dict[str, str]:
+    if LEMMATIZER_ERROR or LEMMATIZER is None:
+        raise HTTPException(status_code=500, detail="Lemmatizer failed to load")
+
+    job_id = str(uuid.uuid4())
+    job = LemmaBatchJob(
+        job_id=job_id,
+        texts=request.texts,
+        language=request.language,
+    )
+    with LEMMA_JOB_LOCK:
+        LEMMA_JOBS[job_id] = job
+
+    thread = threading.Thread(target=run_lemma_batch_job, args=(job,), daemon=True)
+    thread.start()
+
+    return {"job_id": job_id}
+
+
+@app.get("/lemmatize/batch/status/{job_id}")
+async def lemmatize_batch_status(job_id: str) -> dict[str, object]:
+    with LEMMA_JOB_LOCK:
+        job = LEMMA_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    progress = int((job.processed / job.total) * 100) if job.total else 0
+    payload: dict[str, object] = {
+        "job_id": job.job_id,
+        "status": job.status,
+        "processed": job.processed,
+        "total": job.total,
+        "progress": progress,
+    }
+    if job.error:
+        payload["error"] = job.error
+
+    return payload
+
+
+@app.get("/lemmatize/batch/result/{job_id}")
+async def lemmatize_batch_result(job_id: str) -> JSONResponse:
+    with LEMMA_JOB_LOCK:
+        job = LEMMA_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="Job not completed")
+    if job.result_json is None:
+        raise HTTPException(status_code=500, detail="Missing batch result")
+
+    return JSONResponse(content=job.result_json)
