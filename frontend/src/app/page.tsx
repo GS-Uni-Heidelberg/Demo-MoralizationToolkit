@@ -1658,6 +1658,28 @@ export default function Home() {
                 </div>
               )}
 
+              {batchDimiStatus === "done" && batchDimiPreparedFile && (
+                <div className={`${styles.downloadSection} ${styles.fadeInSection}`}>
+                  <div className={styles.downloadLinks}>
+                    <button
+                      className={`${styles.primaryButton} ${styles.downloadButton}`}
+                      type="button"
+                      onClick={() => {
+                        const link = document.createElement("a");
+                        link.href = URL.createObjectURL(batchDimiPreparedFile);
+                        link.download = batchDimiPreparedFile.name;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        URL.revokeObjectURL(link.href);
+                      }}
+                    >
+                      Download DiMi output
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
