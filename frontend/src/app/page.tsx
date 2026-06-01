@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import styles from "./page.module.css";
+import FloatingKeyButton from "../../components/FloatingKeyButton";
 
 type PredictionResponse = {
   label: string;
@@ -1965,6 +1966,7 @@ export default function Home() {
           </div>
         </footer>
       </main>
+      <FloatingKeyButton />
     </div>
   );
 }
