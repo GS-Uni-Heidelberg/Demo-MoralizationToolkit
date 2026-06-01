@@ -696,15 +696,16 @@ export default function Home() {
                 dimi_matched_lemmas: [],
               };
               previewRows.push(previewRow);
-              augmentedRecords.push({
-                ...inputRow.record,
-                id: combinedId,
-                full_text: inputRow.text,
-                text: inputRow.text,
-                dimi_matches: 0,
-                dimi_matched_lemmas: "",
-                no_dimi_match: skipNoDimiMatches,
-              });
+              augmentedRecords.push(
+                buildPreparedRecord(inputRow.record, {
+                  id: combinedId,
+                  text: inputRow.text,
+                  fullText: inputRow.text,
+                  dimiMatches: 0,
+                  dimiMatchedLemmas: "",
+                  noDimiMatch: skipNoDimiMatches ?? false,
+                })
+              );
             } else {
               matchRows.forEach((match) => {
                 const contextText = match.context_sentences.join(" ").trim();
@@ -718,15 +719,16 @@ export default function Home() {
                 };
 
                 previewRows.push(previewRow);
-                augmentedRecords.push({
-                  ...inputRow.record,
-                  id: combinedId,
-                  full_text: inputRow.text,
-                  text: contextText,
-                  dimi_matches: result.matches.length,
-                  dimi_matched_lemmas: previewRow.dimi_matched_lemmas.join("; "),
-                  no_dimi_match: false,
-                });
+                augmentedRecords.push(
+                  buildPreparedRecord(inputRow.record, {
+                    id: combinedId,
+                    text: contextText,
+                    fullText: inputRow.text,
+                    dimiMatches: result.matches.length,
+                    dimiMatchedLemmas: previewRow.dimi_matched_lemmas.join("; "),
+                    noDimiMatch: false,
+                  })
+                );
                 dimiCounter += 1;
               });
             }
@@ -826,13 +828,16 @@ export default function Home() {
 
       setBatchDimiTotal(inputRows.length);
 
-      const augmentedRecords: Array<Record<string, unknown>> = inputRows.map((inputRow) => ({
-        ...inputRow.record,
-        id: inputRow.id,
-        text: inputRow.text,
-        dimi_matches: 0,
-        no_dimi_match: false,
-      }));
+      const augmentedRecords: Array<Record<string, unknown>> = inputRows.map((inputRow) =>
+        buildPreparedRecord(inputRow.record, {
+          id: inputRow.id,
+          text: inputRow.text,
+          fullText: inputRow.text,
+          dimiMatches: 0,
+          dimiMatchedLemmas: "",
+          noDimiMatch: false,
+        })
+      );
 
       setBatchDimiProcessed(inputRows.length);
       setBatchDimiProgress(100);
@@ -1032,6 +1037,63 @@ export default function Home() {
     if (typeof value === "string") return value;
     if (typeof value === "number" || typeof value === "boolean") return String(value);
     return JSON.stringify(value);
+  };
+
+  const translateLabelValue = (value: unknown) => {
+    const normalized = stringifyCell(value).trim().toLowerCase();
+    if (normalized === "1" || normalized === "true" || normalized === "moralization") {
+      return "moralization";
+    }
+    if (
+      normalized === "0" ||
+      normalized === "false" ||
+      normalized === "no_moralization"
+    ) {
+      return "no_moralization";
+    }
+    return stringifyCell(value).trim();
+  };
+
+  const buildPreparedRecord = (
+    inputRecord: Record<string, unknown>,
+    values: {
+      id: string;
+      text: string;
+      fullText: string;
+      dimiMatches: number;
+      dimiMatchedLemmas: string;
+      noDimiMatch: boolean;
+    }
+  ) => {
+    const reservedKeys = new Set([
+      "id",
+      "text",
+      "full_text",
+      "label",
+      "dimi_matches",
+      "dimi_matched_lemmas",
+      "no_dimi_match",
+    ]);
+
+    const preparedRecord: Record<string, unknown> = {
+      id: values.id,
+      text: values.text,
+      full_text: values.fullText,
+      dimi_matches: values.dimiMatches,
+      dimi_matched_lemmas: values.dimiMatchedLemmas,
+      no_dimi_match: values.noDimiMatch,
+    };
+
+    if (Object.prototype.hasOwnProperty.call(inputRecord, "label")) {
+      preparedRecord.label = translateLabelValue(inputRecord.label);
+    }
+
+    Object.keys(inputRecord).forEach((key) => {
+      if (reservedKeys.has(key)) return;
+      preparedRecord[key] = inputRecord[key];
+    });
+
+    return preparedRecord;
   };
 
   const escapeCsvCell = (value: string) => {
