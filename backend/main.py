@@ -79,7 +79,7 @@ class LemmatizerResponse(BaseModel):
 
 
 class LemmaBatchRequest(BaseModel):
-    texts: list[str] = Field(..., min_items=1, max_items=1000)
+    texts: list[str] = Field(..., min_items=1, max_items=50000)
     language: str = Field(..., description="ISO 639-1 code, e.g. 'en', 'de'")
 
 

@@ -63,7 +63,7 @@ type BatchStatusResponse = {
 const MAX_PREVIEW_ROWS = 5;
 const MAX_PREVIEW_COLS = 5;
 const MAX_TEXT_LENGTH = 5000;
-const MAX_BATCH_INSTANCES = 500;
+const MAX_BATCH_INSTANCES = 200000;
 
 const DEFAULT_TEXT =
   "Aber den weiteren Ausgleich, den es dort gibt, den Ausgleich zwischen Arm und Reich, halten wir in der Gesundheitsversicherung für wenig treffsicher und deswegen für sozial ungerecht.";
