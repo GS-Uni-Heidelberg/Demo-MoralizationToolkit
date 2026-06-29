@@ -45,8 +45,8 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 OPENAI_CLIENT = None
 ANTHROPIC_CLIENT = None
-OPENAI_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "openai" / "de"
-ANTHROPIC_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "anthropic" / "de"
+OPENAI_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "openai"
+ANTHROPIC_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "anthropic"
 
 LEMMAS_DIR = Path(os.environ.get("LEMMAS_DIR", ROOT_DIR / "models" / "dimi"))
 
