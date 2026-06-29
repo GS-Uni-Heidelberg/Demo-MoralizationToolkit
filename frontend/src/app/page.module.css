@@ -111,6 +111,13 @@
   gap: 16px;
 }
 
+.analyzeControlStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .primaryButton {
   border: none;
   border-radius: 999px;

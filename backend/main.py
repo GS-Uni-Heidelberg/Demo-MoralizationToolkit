@@ -485,13 +485,14 @@ class LemmatizerBundle:
     """
     Maintains one stanza.Pipeline per language, created lazily on first use.
     Uses package='default' (smallest available model) for every language.
-    Stanza pipelines are not thread-safe; a single lock serialises all access.
-    For higher concurrency, replace with a per-language lock dict.
+    The cached single-text path serialises access to shared pipelines.
+    Batch jobs can opt into their own pipeline instance for parallelism.
     """
 
     def __init__(self) -> None:
         self._pipelines: dict[str, stanza.Pipeline] = {}
-        self._lock = threading.Lock()
+        self._cache_lock = threading.Lock()
+        self._build_lock = threading.Lock()
         for lang in LEMMA_CACHE:
             try:
                 self._get_pipeline(lang)
@@ -501,21 +502,25 @@ class LemmatizerBundle:
 
     # ── private ────────────────────────────────────────────────────────────
 
-    def _get_pipeline(self, language: str) -> stanza.Pipeline:
-        """Return cached pipeline, downloading + building it on first use."""
-        if language not in self._pipelines:
+    def _build_pipeline(self, language: str) -> stanza.Pipeline:
+        with self._build_lock:
             stanza.download(
                 language,
                 package="default",
                 processors="tokenize,pos,lemma",
                 logging_level="WARN",
             )
-            self._pipelines[language] = stanza.Pipeline(
+            return stanza.Pipeline(
                 language,
                 package="default",
                 processors="tokenize,pos,lemma",
                 logging_level="WARN",
             )
+
+    def _get_pipeline(self, language: str) -> stanza.Pipeline:
+        """Return cached pipeline, downloading + building it on first use."""
+        if language not in self._pipelines:
+            self._pipelines[language] = self._build_pipeline(language)
         return self._pipelines[language]
 
     @staticmethod
@@ -620,9 +625,29 @@ class LemmatizerBundle:
                 f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
             )
         dict_set = set(LEMMA_CACHE[language])  # already lowercased
-        with self._lock:
+        with self._cache_lock:
             pipeline = self._get_pipeline(language)
             return self._find_lemmas_with_pipeline(text, dict_set, pipeline)
+
+    def find_lemmas_batch_isolated(
+        self,
+        texts: list[str],
+        language: str,
+        on_progress: Callable[[int], None] | None = None,
+    ) -> list[LemmatizerResponse]:
+        if language not in LEMMA_CACHE:
+            raise ValueError(
+                f"No lemma file found for language '{language}'. "
+                f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
+            )
+        dict_set = set(LEMMA_CACHE[language])  # already lowercased
+        pipeline = self._build_pipeline(language)
+        results: list[LemmatizerResponse] = []
+        for index, text in enumerate(texts, start=1):
+            results.append(self._find_lemmas_with_pipeline(text, dict_set, pipeline))
+            if on_progress:
+                on_progress(index)
+        return results
 
     def find_lemmas_batch(
         self,
@@ -636,7 +661,7 @@ class LemmatizerBundle:
                 f"Expected: {LEMMAS_DIR / f'lemmas_{language}.xlsx'}"
             )
         dict_set = set(LEMMA_CACHE[language])  # already lowercased
-        with self._lock:
+        with self._cache_lock:
             pipeline = self._get_pipeline(language)
             results: list[LemmatizerResponse] = []
             for index, text in enumerate(texts, start=1):
@@ -1002,7 +1027,7 @@ def run_lemma_batch_job(job: LemmaBatchJob) -> None:
         job.processed = value
 
     try:
-        results = LEMMATIZER.find_lemmas_batch(
+        results = LEMMATIZER.find_lemmas_batch_isolated(
             texts=job.texts,
             language=job.language,
             on_progress=_update_progress,

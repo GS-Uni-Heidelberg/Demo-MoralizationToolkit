@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 import FloatingKeyButton from "../../components/FloatingKeyButton";
@@ -195,6 +195,7 @@ export default function Home() {
   const [batchDimiProgress, setBatchDimiProgress] = useState<number>(0);
   const [batchDimiProcessed, setBatchDimiProcessed] = useState<number>(0);
   const [batchDimiTotal, setBatchDimiTotal] = useState<number>(0);
+  const [batchDimiStartedAt, setBatchDimiStartedAt] = useState<number | null>(null);
   const [batchDimiPreparedFile, setBatchDimiPreparedFile] = useState<File | null>(null);
   const [batchDimiSkipped, setBatchDimiSkipped] = useState<boolean>(false);
   const [dimiPreviewRows, setDimiPreviewRows] = useState<DimiPreviewRow[]>([]);
@@ -207,6 +208,7 @@ export default function Home() {
   const [batchProgress, setBatchProgress] = useState<number>(0);
   const [batchProcessed, setBatchProcessed] = useState<number>(0);
   const [batchTotal, setBatchTotal] = useState<number>(0);
+  const [batchStartedAt, setBatchStartedAt] = useState<number | null>(null);
   const [skipNoDimiMatches, setSkipNoDimiMatches] = useState<boolean | null>(null);
   const [inputPreview, setInputPreview] = useState<string[][]>([]);
   const [inputPreviewJson, setInputPreviewJson] = useState<string | null>(null);
@@ -220,6 +222,8 @@ export default function Home() {
     "Run a batch request to see the output preview."
   );
   const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
+  const [clockTick, setClockTick] = useState<number>(0);
+  const batchDimiRunIdRef = useRef(0);
 
   const clearBatchRunState = () => {
     setBatchStatus("idle");
@@ -227,6 +231,7 @@ export default function Home() {
     setBatchProgress(0);
     setBatchProcessed(0);
     setBatchTotal(0);
+    setBatchStartedAt(null);
     if (batchDownloadUrl) {
       URL.revokeObjectURL(batchDownloadUrl);
       setBatchDownloadUrl(null);
@@ -240,11 +245,13 @@ export default function Home() {
   };
 
   const clearBatchDimiState = () => {
+    batchDimiRunIdRef.current += 1;
     setBatchDimiStatus("idle");
     setBatchDimiError(null);
     setBatchDimiProgress(0);
     setBatchDimiProcessed(0);
     setBatchDimiTotal(0);
+    setBatchDimiStartedAt(null);
     setBatchDimiPreparedFile(null);
     setBatchDimiSkipped(false);
     setSkipNoDimiMatches(null);
@@ -256,6 +263,31 @@ export default function Home() {
   const confirmBatchReset = (message: string) => {
     if (typeof window === "undefined") return true;
     return window.confirm(message);
+  };
+
+  const formatDuration = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainingSeconds = safeSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${remainingSeconds}s`;
+    }
+
+    if (minutes === 0) {
+      return `${remainingSeconds}s`;
+    }
+
+    return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+  };
+
+  const estimateRemainingTime = (startedAt: number | null, progress: number) => {
+    if (!startedAt || progress <= 0 || progress >= 100) return null;
+
+    const elapsedSeconds = (Date.now() - startedAt) / 1000;
+    const estimatedTotalSeconds = (elapsedSeconds * 100) / progress;
+    return formatDuration(estimatedTotalSeconds - elapsedSeconds);
   };
 
   const hasPreparedDimiState = () => {
@@ -309,6 +341,37 @@ export default function Home() {
     if (!result) return "--";
     return result.explanation?.trim() || "--";
   }, [result]);
+
+  const formatInstanceLabel = (count: number) => `${count} instance${count === 1 ? "" : "s"}`;
+  const dimiProcessedInstanceCount = useMemo(() => dimiPreviewRows.length, [dimiPreviewRows]);
+  const dimiSkippedInstanceCount = useMemo(
+    () => dimiPreviewRows.filter((row) => row.dimi_matches === 0).length,
+    [dimiPreviewRows]
+  );
+  const lmDetectionInstanceCount = useMemo(() => {
+    if (batchDimiSkipped) {
+      return batchDimiTotal;
+    }
+    if (skipNoDimiMatches === true) {
+      return Math.max(dimiProcessedInstanceCount - dimiSkippedInstanceCount, 0);
+    }
+    return dimiProcessedInstanceCount;
+  }, [
+    batchDimiSkipped,
+    batchDimiTotal,
+    skipNoDimiMatches,
+    dimiProcessedInstanceCount,
+    dimiSkippedInstanceCount,
+  ]);
+  const dimiEta = useMemo(
+    () => estimateRemainingTime(batchDimiStartedAt, batchDimiProgress),
+    [batchDimiStartedAt, batchDimiProgress, clockTick]
+  );
+  const batchEta = useMemo(
+    () => estimateRemainingTime(batchStartedAt, batchProgress),
+    [batchStartedAt, batchProgress, clockTick]
+  );
+
   const shouldShowResult =
     result !== null && resultModel === selectedModel && resultLanguage === lmLanguage;
 
@@ -338,6 +401,18 @@ export default function Home() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedData]);
+
+  useEffect(() => {
+    if (batchStatus !== "uploading" && batchStatus !== "processing" && batchDimiStatus !== "processing") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setClockTick((value) => value + 1);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [batchStatus, batchDimiStatus]);
 
   const resetAppState = () => {
     const ok = window.confirm(
@@ -652,6 +727,7 @@ export default function Home() {
     clearBatchDimiState();
     setBatchDimiStatus("processing");
     setBatchDimiError(null);
+    setBatchDimiStartedAt(Date.now());
     setBatchDimiProgress(0);
     setBatchDimiProcessed(0);
     setBatchDimiTotal(0);
@@ -661,8 +737,11 @@ export default function Home() {
     setDimiPreviewJson(null);
     setDimiPreviewNote(null);
 
+    const runId = batchDimiRunIdRef.current;
+
     try {
       const textContent = await batchFile.text();
+      if (runId !== batchDimiRunIdRef.current) return;
       const inputRows = parseBatchInput(textContent, batchFile.name);
 
       if (inputRows.length === 0) {
@@ -676,6 +755,7 @@ export default function Home() {
       }
 
       setBatchDimiTotal(inputRows.length);
+      if (runId !== batchDimiRunIdRef.current) return;
 
       const startResponse = await fetch("http://localhost:8000/lemmatize/batch/start", {
         method: "POST",
@@ -692,17 +772,22 @@ export default function Home() {
       }
 
       const startPayload = (await startResponse.json()) as { job_id: string };
+      if (runId !== batchDimiRunIdRef.current) return;
 
       const pollStatus = async () => {
+        if (runId !== batchDimiRunIdRef.current) return true;
+
         const statusResponse = await fetch(
           `http://localhost:8000/lemmatize/batch/status/${startPayload.job_id}`
         );
+        if (runId !== batchDimiRunIdRef.current) return true;
         if (!statusResponse.ok) {
           const message = await statusResponse.text();
           throw new Error(message || "DiMi status request failed");
         }
 
         const statusPayload = (await statusResponse.json()) as BatchStatusResponse;
+        if (runId !== batchDimiRunIdRef.current) return true;
         setBatchDimiProcessed(statusPayload.processed);
         setBatchDimiProgress(statusPayload.progress);
 
@@ -710,12 +795,14 @@ export default function Home() {
           const resultResponse = await fetch(
             `http://localhost:8000/lemmatize/batch/result/${startPayload.job_id}`
           );
+          if (runId !== batchDimiRunIdRef.current) return true;
           if (!resultResponse.ok) {
             const message = await resultResponse.text();
             throw new Error(message || "DiMi result request failed");
           }
 
           const results = (await resultResponse.json()) as LemmatizerResponse[];
+          if (runId !== batchDimiRunIdRef.current) return true;
           if (results.length !== inputRows.length) {
             throw new Error("DiMi preprocessing returned unexpected batch size.");
           }
@@ -780,6 +867,8 @@ export default function Home() {
             );
           }
 
+          if (runId !== batchDimiRunIdRef.current) return true;
+
           const preparedName = batchFile.name.replace(/\.(csv|json)$/i, "") || "dimi-input";
           if (batchOutputFormat === "json") {
             const jsonText = JSON.stringify(augmentedRecords, null, 2);
@@ -814,6 +903,7 @@ export default function Home() {
         let completed = false;
         while (!completed) {
           completed = await pollStatus();
+          if (runId !== batchDimiRunIdRef.current) return;
           if (!completed) await new Promise((resolve) => setTimeout(resolve, 600));
         }
       };
@@ -821,6 +911,7 @@ export default function Home() {
       await pollLoop();
 
     } catch (error) {
+      if (runId !== batchDimiRunIdRef.current) return;
       setBatchDimiStatus("error");
       setBatchDimiError(error instanceof Error ? error.message : "Unexpected error");
       setBatchDimiPreparedFile(null);
@@ -843,6 +934,7 @@ export default function Home() {
 
     setSkipNoDimiMatches(false);
     setBatchDimiError(null);
+    setBatchDimiStartedAt(null);
     setBatchDimiProgress(0);
     setBatchDimiProcessed(0);
     setBatchDimiTotal(0);
@@ -919,6 +1011,7 @@ export default function Home() {
 
     setBatchStatus("uploading");
     setBatchError(null);
+    setBatchStartedAt(Date.now());
     setOutputPreviewJson(null);
     setBatchMetrics(null);
     setBatchProgress(0);
@@ -1431,13 +1524,20 @@ export default function Home() {
                   />
 
                   <div className={styles.actions}>
-                    <button
-                      className={styles.primaryButton}
-                      type="submit"
-                      disabled={dimiStatus === "loading"}
-                    >
-                      {dimiStatus === "loading" ? "Analyzing..." : "Analyze"}
-                    </button>
+                    <div className={styles.analyzeControlStack}>
+                      <button
+                        className={styles.primaryButton}
+                        type="submit"
+                        disabled={dimiStatus === "loading"}
+                      >
+                        {dimiStatus === "loading" ? "Analyzing..." : "Analyze"}
+                      </button>
+                      {dimiStatus === "loading" && (
+                        <div className={styles.progressBar} aria-hidden="true">
+                          <span className={styles.progressFill} />
+                        </div>
+                      )}
+                    </div>
                     <span className={styles.hint}>
                       {dimiText.length}/{MAX_TEXT_LENGTH}
                     </span>
@@ -1527,13 +1627,20 @@ export default function Home() {
                     placeholder="Paste text to analyze for moralization..."
                   />
                   <div className={styles.actions}>
-                    <button
-                      className={styles.primaryButton}
-                      type="submit"
-                      disabled={isSingleAnalyzeDisabled}
-                    >
-                      {status === "loading" ? "Analyzing..." : "Analyze"}
-                    </button>
+                    <div className={styles.analyzeControlStack}>
+                      <button
+                        className={styles.primaryButton}
+                        type="submit"
+                        disabled={isSingleAnalyzeDisabled}
+                      >
+                        {status === "loading" ? "Analyzing..." : "Analyze"}
+                      </button>
+                      {status === "loading" && (
+                        <div className={styles.progressBar} aria-hidden="true">
+                          <span className={styles.progressFill} />
+                        </div>
+                      )}
+                    </div>
                     <span className={styles.hint}>
                       {text.length}/{MAX_TEXT_LENGTH}
                     </span>
@@ -1740,6 +1847,7 @@ export default function Home() {
                         </div>
                         <p className={styles.progressText}>
                           {batchDimiProgress}% ({batchDimiProcessed}/{batchDimiTotal})
+                          {dimiEta ? ` · about ${dimiEta} remaining` : ""}
                         </p>
                       </>
                     )}
@@ -1754,6 +1862,9 @@ export default function Home() {
                 <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
                   <p className={styles.previewTitle}>
                     DiMi preview ({(batchOutputFormat ?? "csv").toUpperCase()})
+                  </p>
+                  <p className={styles.hint}>
+                    {formatInstanceLabel(dimiProcessedInstanceCount)} processed after DiMi.
                   </p>
                   {batchOutputFormat === "json" ? (
                     dimiPreviewJson ? (
@@ -1844,8 +1955,16 @@ export default function Home() {
               {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
-                    <p className={styles.previewTitle}>Skip instances with no DiMi Matches; these are also ignored for the metrics calculation</p>
+                    <p className={styles.previewTitle}>
+                      Skip instances with no DiMi Matches; these are also ignored for the metrics
+                      calculation
+                    </p>
                   </div>
+                  <p className={styles.hint}>
+                    {formatInstanceLabel(dimiSkippedInstanceCount)} would be skipped out of{" "}
+                    {formatInstanceLabel(dimiProcessedInstanceCount)} (total DiMi matches).
+                  </p>
+                  <br/>
                   <div className={styles.languageSwitch}>
                     <div className={styles.modeTabs}>
                       <button
@@ -1872,7 +1991,9 @@ export default function Home() {
               {batchDimiStatus === "done" && batchDimiPreparedFile && skipNoDimiMatches !== null && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
-                    <p className={styles.previewTitle}>Run LM Detection ...</p>
+                    <p className={styles.previewTitle}>
+                      Run LM Detection ({formatInstanceLabel(lmDetectionInstanceCount)})...
+                    </p>
                   </div>
 
                   <div className={styles.progressWrap}>
@@ -1901,6 +2022,7 @@ export default function Home() {
 
                         <p className={styles.progressText}>
                           {batchProgress}% ({batchProcessed}/{batchTotal})
+                          {batchEta ? ` · about ${batchEta} remaining` : ""}
                         </p>
                       </>
                     )}
