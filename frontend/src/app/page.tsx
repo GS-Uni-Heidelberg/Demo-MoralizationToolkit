@@ -1538,9 +1538,11 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    <span className={styles.hint}>
-                      {dimiText.length}/{MAX_TEXT_LENGTH}
-                    </span>
+                    {dimiStatus !== "loading" && (
+                      <span className={styles.hint}>
+                        {dimiText.length}/{MAX_TEXT_LENGTH}
+                      </span>
+                    )}
                   </div>
                 </form>
               </section>
@@ -1641,9 +1643,11 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    <span className={styles.hint}>
-                      {text.length}/{MAX_TEXT_LENGTH}
-                    </span>
+                    {status !== "loading" && (
+                      <span className={styles.hint}>
+                        {text.length}/{MAX_TEXT_LENGTH}
+                      </span>
+                    )}
                   </div>
                 </form>
               </section>
