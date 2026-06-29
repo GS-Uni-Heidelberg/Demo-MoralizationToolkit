@@ -256,8 +256,30 @@
     color 0.2s ease;
 }
 
+.modeTabWrap {
+  display: inline-flex;
+}
+
+.modeTab:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  box-shadow: none;
+}
+
 .modeTab:not(.modeTabActive):hover {
   background: rgba(10, 24, 35, 0.06);
+}
+
+.modeTab:disabled:hover {
+  background: transparent;
+}
+
+.modelWarning {
+  margin-top: -4px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #a12b2b;
 }
 
 .modeTabActive {

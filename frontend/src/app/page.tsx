@@ -88,9 +88,9 @@ const MODEL_OPTIONS: Array<{
   label: string;
   name: string;
 }> = [
-  { code: "xlm-roberta", label: "XLM-RoBERTa", name: "Current Model" },
-  { code: "claude", label: "Claude Haiku 4.5", name: "Claude" },
-  { code: "openai", label: "OpenAI GPT-5 mini", name: "OpenAI" },
+  { code: "xlm-roberta", label: "XLM-RoBERTa", name: "Fine-Tuned XLM-RoBERTa Model" },
+  { code: "claude", label: "Claude Haiku 4.5", name: "Claude Haiku 4.5" },
+  { code: "openai", label: "OpenAI GPT-5 mini", name: "OpenAI GPT-5 mini" },
 ];
 
 
@@ -179,7 +179,9 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
   const [resultModel, setResultModel] = useState<ModelCode | null>(null);
+  const [resultLanguage, setResultLanguage] = useState<LanguageCode | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelCode>("xlm-roberta");
+  const [lmLanguage, setLmLanguage] = useState<LanguageCode>("de");
 
   // Batch state
   const [batchFile, setBatchFile] = useState<File | null>(null);
@@ -298,6 +300,7 @@ export default function Home() {
   const selectedModelLabel = useMemo(() => {
     return MODEL_OPTIONS.find((option) => option.code === selectedModel)?.label ?? "XLM-RoBERTa";
   }, [selectedModel]);
+  const xlmWarning = "Model only fine-tuned on German texts. Not tested on other languages!";
   const confidenceLabel = useMemo(() => {
     if (!result) return "--";
     return `${(result.confidence * 100).toFixed(2)}%`;
@@ -306,7 +309,8 @@ export default function Home() {
     if (!result) return "--";
     return result.explanation?.trim() || "--";
   }, [result]);
-  const shouldShowResult = result !== null && resultModel === selectedModel;
+  const shouldShowResult =
+    result !== null && resultModel === selectedModel && resultLanguage === lmLanguage;
 
   const hasUnsavedData = batchFile !== null;
 
@@ -348,6 +352,9 @@ export default function Home() {
     setErrorMessage(null);
     setResult(null);
     setSelectedModel("xlm-roberta");
+    setLmLanguage("de");
+    setResultModel(null);
+    setResultLanguage(null);
     setDimiStatus("idle");
     setDimiError(null);
     setDimiResult(null);
@@ -435,14 +442,20 @@ export default function Home() {
     setErrorMessage(null);
     setResult(null);
     setResultModel(null);
+    setResultLanguage(null);
 
     const modelForRequest = selectedModel;
+    const languageForRequest = lmLanguage;
 
     try {
       const response = await fetch("http://localhost:8000/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: trimmed, model: modelForRequest }),
+        body: JSON.stringify({
+          text: trimmed,
+          model: modelForRequest,
+          language: languageForRequest,
+        }),
       });
 
       if (!response.ok) {
@@ -453,6 +466,7 @@ export default function Home() {
       const data = (await response.json()) as PredictionResponse;
       setResult(data);
       setResultModel(modelForRequest);
+      setResultLanguage(languageForRequest);
       setStatus("idle");
     } catch (error) {
       setStatus("error");
@@ -1446,17 +1460,22 @@ export default function Home() {
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleSubmit}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Model</span>
+                    <span className={styles.label}>Language</span>
                     <div className={styles.modeTabs}>
-                      {MODEL_OPTIONS.map((option) => (
+                      {LANGUAGE_OPTIONS.map((option) => (
                         <button
                           key={option.code}
                           className={`${styles.modeTab} ${
-                            selectedModel === option.code ? styles.modeTabActive : ""
+                            lmLanguage === option.code ? styles.modeTabActive : ""
                           }`}
                           type="button"
-                          onClick={() => setSelectedModel(option.code)}
-                          aria-pressed={selectedModel === option.code}
+                          onClick={() => {
+                            setLmLanguage(option.code);
+                            if (option.code !== "de" && selectedModel === "xlm-roberta") {
+                              setSelectedModel("claude");
+                            }
+                          }}
+                          aria-pressed={lmLanguage === option.code}
                           title={option.name}
                         >
                           {option.label}
@@ -1464,6 +1483,37 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+                  <div className={styles.languageSwitch}>
+                    <span className={styles.label}>Model</span>
+                    <div className={styles.modeTabs}>
+                      {MODEL_OPTIONS.map((option) => {
+                        const isWarned = option.code === "xlm-roberta" && lmLanguage !== "de";
+
+                        const button = (
+                          <button
+                            className={`${styles.modeTab} ${
+                              selectedModel === option.code ? styles.modeTabActive : ""
+                            }`}
+                            type="button"
+                            onClick={() => setSelectedModel(option.code)}
+                            aria-pressed={selectedModel === option.code}
+                            title={isWarned ? xlmWarning : option.name}
+                          >
+                            {option.label}
+                          </button>
+                        );
+
+                        return (
+                          <span key={option.code} className={styles.modeTabWrap}>
+                            {button}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {selectedModel === "xlm-roberta" && lmLanguage !== "de" && (
+                    <p className={styles.modelWarning}>{xlmWarning}</p>
+                  )}
                   <label className={styles.label} htmlFor="textInputSecondary">
                     Text input
                   </label>
