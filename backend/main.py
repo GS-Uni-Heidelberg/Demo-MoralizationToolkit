@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import io
 import json
 import os
 import re
+import time
 import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import openpyxl
 import stanza
@@ -20,7 +22,17 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional convenience dependency
+    load_dotenv = None
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+if load_dotenv is not None:
+    load_dotenv(ROOT_DIR / "backend" / ".env")
+    load_dotenv(ROOT_DIR / "backend" / ".env.local", override=True)
+
 DEFAULT_MODEL_DIR = (
     ROOT_DIR
     / "models"
@@ -29,6 +41,12 @@ DEFAULT_MODEL_DIR = (
 )
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", DEFAULT_MODEL_DIR))
 MODEL_NAME = "roberta-finetuned"
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+OPENAI_CLIENT = None
+ANTHROPIC_CLIENT = None
+OPENAI_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "openai" / "de"
+ANTHROPIC_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "anthropic" / "de"
 
 LEMMAS_DIR = Path(os.environ.get("LEMMAS_DIR", ROOT_DIR / "models" / "dimi"))
 
@@ -58,11 +76,16 @@ app.add_middleware(
 
 class PredictRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)
+    model: str = Field(
+        default="xlm-roberta",
+        description="Selected model for moralization prediction.",
+    )
 
 
 class PredictResponse(BaseModel):
     label: str
     confidence: float
+    explanation: str | None = None
 
 
 # ── LEMMATIZER MODELS ─────────────────────────────────────────────────────────
@@ -172,6 +195,221 @@ class ModelBundle:
         confidence = round(float(probs[best_idx].item()), 4)
 
         return PredictResponse(label=label, confidence=confidence)
+
+
+def load_prompt_assets(prompt_path: Path) -> tuple[str, str]:
+    system_prompt = ""
+    user_lines: list[str] = []
+    in_user_block = False
+
+    for line in prompt_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("system:"):
+            system_prompt = json.loads(line.split("system:", 1)[1].strip())
+            continue
+
+        if line.startswith("user:"):
+            in_user_block = True
+            continue
+
+        if line.startswith("output_format:"):
+            break
+
+        if in_user_block:
+            if line.startswith("    "):
+                user_lines.append(line[4:])
+            elif line == "":
+                user_lines.append("")
+
+    if not system_prompt:
+        raise RuntimeError(f"Missing system prompt in {prompt_path}")
+    if not user_lines:
+        raise RuntimeError(f"Missing user prompt in {prompt_path}")
+
+    return system_prompt, "\n".join(user_lines).rstrip()
+
+
+def load_response_format(schema_path: Path) -> dict:
+    spec = importlib.util.spec_from_file_location("openai_output_format", schema_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load response format from {schema_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    output_format = getattr(module, "output", None)
+    if not isinstance(output_format, dict):
+        raise RuntimeError(f"Missing output dict in {schema_path}")
+
+    return output_format
+
+
+OPENAI_SYSTEM_PROMPT, OPENAI_USER_PROMPT = load_prompt_assets(OPENAI_PROMPT_DIR / "prompt.yaml")
+OPENAI_RESPONSE_FORMAT = load_response_format(OPENAI_PROMPT_DIR / "output_format.py")
+ANTHROPIC_SYSTEM_PROMPT, ANTHROPIC_USER_PROMPT = load_prompt_assets(
+    ANTHROPIC_PROMPT_DIR / "prompt.yaml"
+)
+ANTHROPIC_RESPONSE_FORMAT = load_response_format(ANTHROPIC_PROMPT_DIR / "output_format.py")
+
+
+def analyze_with_openai(
+    text: str,
+    sys_prompt: str,
+    user_prompt: str,
+    response_format: dict,
+    model: str,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+) -> tuple[dict, float]:
+    prompt = user_prompt.format(text=text)
+
+    for attempt in range(max_retries):
+        try:
+            start_time = time.time()
+            client = get_openai_client()
+            response = client.chat.completions.create(
+                model=model,
+                seed=42,
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=response_format,
+            )
+            end_time = time.time()
+            generation_time = end_time - start_time
+            content = response.choices[0].message.content or "{}"
+            try:
+                data = parse_json_response(content, source="OpenAI")
+            except json.JSONDecodeError:
+                print(f"Raw OpenAI response that failed to parse: {content}")
+                raise
+            return data, generation_time
+        except Exception as exc:
+            if attempt < max_retries - 1:
+                print(f"Retrying ({attempt + 1}/{max_retries}) after error: {exc}")
+                time.sleep(retry_delay)
+            else:
+                raise
+
+
+def analyze_with_anthropic(
+    text: str,
+    sys_prompt: str,
+    user_prompt: str,
+    response_format: dict,
+    model: str,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+) -> tuple[dict, float]:
+    prompt = user_prompt.format(text=text)
+
+    for attempt in range(max_retries):
+        try:
+            start_time = time.time()
+            client = get_anthropic_client()
+            response = client.messages.create(
+                model=model,
+                max_tokens=1500,
+                system=sys_prompt,
+                messages=[
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            end_time = time.time()
+            generation_time = end_time - start_time
+            content = "".join(
+                block.text for block in response.content if getattr(block, "type", None) == "text"
+            ).strip()
+            try:
+                data = parse_json_response(content, source="Anthropic")
+            except json.JSONDecodeError:
+                print(f"Raw Anthropic response that failed to parse: {content}")
+                raise
+            return data, generation_time
+        except Exception as exc:
+            if attempt < max_retries - 1:
+                print(f"Retrying ({attempt + 1}/{max_retries}) after error: {exc}")
+                time.sleep(retry_delay)
+            else:
+                raise
+
+
+def get_openai_client() -> Any:
+    global OPENAI_CLIENT
+
+    if OPENAI_CLIENT is None:
+        try:
+            openai_module = importlib.import_module("openai")
+        except ImportError as exc:
+            raise RuntimeError("The openai package is not installed.") from exc
+
+        openai_client_class = getattr(openai_module, "OpenAI", None)
+        if openai_client_class is None:
+            raise RuntimeError("The openai package does not expose OpenAI.")
+
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set.")
+        OPENAI_CLIENT = openai_client_class(api_key=api_key)
+
+    return OPENAI_CLIENT
+
+
+def get_anthropic_client() -> Any:
+    global ANTHROPIC_CLIENT
+
+    if ANTHROPIC_CLIENT is None:
+        try:
+            anthropic_module = importlib.import_module("anthropic")
+        except ImportError as exc:
+            raise RuntimeError("The anthropic package is not installed.") from exc
+
+        anthropic_client_class = getattr(anthropic_module, "Anthropic", None)
+        if anthropic_client_class is None:
+            raise RuntimeError("The anthropic package does not expose Anthropic.")
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is not set.")
+        ANTHROPIC_CLIENT = anthropic_client_class(api_key=api_key)
+
+    return ANTHROPIC_CLIENT
+
+
+def parse_json_response(content: str, source: str) -> dict:
+    cleaned = content.strip()
+
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        print(f"{source} response after fence cleanup: {cleaned}")
+        raise
+
+
+def parse_prediction_payload(payload: dict) -> PredictResponse:
+    if isinstance(payload.get("moralisierung"), dict):
+        moralisierung = payload["moralisierung"]
+        contains_moralisierung = bool(moralisierung.get("enthaelt_moralisierung", False))
+        return PredictResponse(
+            label="moralization" if contains_moralisierung else "no_moralization",
+            confidence=1.0 if contains_moralisierung else 0.0,
+            explanation=str(moralisierung.get("begruendung", "")) or None,
+        )
+
+    label = str(payload.get("label", "no_moralization"))
+    confidence_value = payload.get("confidence", 0.0)
+
+    try:
+        confidence = float(confidence_value)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    confidence = max(0.0, min(1.0, confidence))
+    return PredictResponse(label=label, confidence=round(confidence, 4))
 
 
 # ── LEMMA LOADER ──────────────────────────────────────────────────────────────
@@ -811,7 +1049,32 @@ async def predict(request: PredictRequest) -> PredictResponse:
         raise HTTPException(status_code=500, detail="Model failed to load")
 
     try:
-        return MODEL.predict(request.text)
+        selected_model = request.model.strip().lower()
+
+        if selected_model == "xlm-roberta":
+            return MODEL.predict(request.text)
+        elif selected_model == "claude":
+            payload, _generation_time = analyze_with_anthropic(
+                text=request.text,
+                sys_prompt=ANTHROPIC_SYSTEM_PROMPT,
+                user_prompt=ANTHROPIC_USER_PROMPT,
+                response_format=ANTHROPIC_RESPONSE_FORMAT,
+                model=ANTHROPIC_MODEL,
+            )
+            return parse_prediction_payload(payload)
+        elif selected_model == "openai":
+            payload, _generation_time = analyze_with_openai(
+                text=request.text,
+                sys_prompt=OPENAI_SYSTEM_PROMPT,
+                user_prompt=OPENAI_USER_PROMPT,
+                response_format=OPENAI_RESPONSE_FORMAT,
+                model=OPENAI_MODEL,
+            )
+            return parse_prediction_payload(payload)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

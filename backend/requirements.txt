@@ -4,3 +4,6 @@ torch
 transformers
 python-multipart
 stanza
+openai
+python-dotenv
+anthropic

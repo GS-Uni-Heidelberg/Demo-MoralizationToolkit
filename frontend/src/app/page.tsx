@@ -8,12 +8,14 @@ import FloatingKeyButton from "../../components/FloatingKeyButton";
 type PredictionResponse = {
   label: string;
   confidence: number;
+  explanation?: string | null;
 };
 
 type BatchStatus = "idle" | "uploading" | "processing" | "error" | "done";
 type ViewMode = "single" | "batch";
 
 type LanguageCode = "de" | "en" | "fr" | "it";
+type ModelCode = "xlm-roberta" | "claude" | "openai";
 
 type LemmaMatchResult = {
   sentence_index: number;
@@ -79,6 +81,16 @@ const LANGUAGE_OPTIONS: Array<{
   { code: "en", label: "EN", name: "English" },
   { code: "fr", label: "FR", name: "Français" },
   { code: "it", label: "IT", name: "Italiano" },
+];
+
+const MODEL_OPTIONS: Array<{
+  code: ModelCode;
+  label: string;
+  name: string;
+}> = [
+  { code: "xlm-roberta", label: "XLM-RoBERTa", name: "Current Model" },
+  { code: "claude", label: "Claude Haiku 4.5", name: "Claude" },
+  { code: "openai", label: "OpenAI GPT-5 mini", name: "OpenAI" },
 ];
 
 
@@ -166,6 +178,8 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponse | null>(null);
+  const [resultModel, setResultModel] = useState<ModelCode | null>(null);
+  const [selectedModel, setSelectedModel] = useState<ModelCode>("xlm-roberta");
 
   // Batch state
   const [batchFile, setBatchFile] = useState<File | null>(null);
@@ -281,10 +295,18 @@ export default function Home() {
   const isDisabled = status === "loading" || text.trim().length === 0;
   const isTextTooLong = text.length > MAX_TEXT_LENGTH;
   const isSingleAnalyzeDisabled = isDisabled || isTextTooLong;
+  const selectedModelLabel = useMemo(() => {
+    return MODEL_OPTIONS.find((option) => option.code === selectedModel)?.label ?? "XLM-RoBERTa";
+  }, [selectedModel]);
   const confidenceLabel = useMemo(() => {
     if (!result) return "--";
     return `${(result.confidence * 100).toFixed(2)}%`;
   }, [result]);
+  const explanationText = useMemo(() => {
+    if (!result) return "--";
+    return result.explanation?.trim() || "--";
+  }, [result]);
+  const shouldShowResult = result !== null && resultModel === selectedModel;
 
   const hasUnsavedData = batchFile !== null;
 
@@ -325,6 +347,7 @@ export default function Home() {
     setStatus("idle");
     setErrorMessage(null);
     setResult(null);
+    setSelectedModel("xlm-roberta");
     setDimiStatus("idle");
     setDimiError(null);
     setDimiResult(null);
@@ -411,12 +434,15 @@ export default function Home() {
     setStatus("loading");
     setErrorMessage(null);
     setResult(null);
+    setResultModel(null);
+
+    const modelForRequest = selectedModel;
 
     try {
       const response = await fetch("http://localhost:8000/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: trimmed }),
+        body: JSON.stringify({ text: trimmed, model: modelForRequest }),
       });
 
       if (!response.ok) {
@@ -426,6 +452,7 @@ export default function Home() {
 
       const data = (await response.json()) as PredictionResponse;
       setResult(data);
+      setResultModel(modelForRequest);
       setStatus("idle");
     } catch (error) {
       setStatus("error");
@@ -1418,6 +1445,25 @@ export default function Home() {
               </p>
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleSubmit}>
+                  <div className={styles.languageSwitch}>
+                    <span className={styles.label}>Model</span>
+                    <div className={styles.modeTabs}>
+                      {MODEL_OPTIONS.map((option) => (
+                        <button
+                          key={option.code}
+                          className={`${styles.modeTab} ${
+                            selectedModel === option.code ? styles.modeTabActive : ""
+                          }`}
+                          type="button"
+                          onClick={() => setSelectedModel(option.code)}
+                          aria-pressed={selectedModel === option.code}
+                          title={option.name}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label className={styles.label} htmlFor="textInputSecondary">
                     Text input
                   </label>
@@ -1439,21 +1485,29 @@ export default function Home() {
                       {status === "loading" ? "Analyzing..." : "Analyze"}
                     </button>
                     <span className={styles.hint}>
-                      Local model: XLM-RoBERTa · {text.length}/{MAX_TEXT_LENGTH}
+                      {text.length}/{MAX_TEXT_LENGTH}
                     </span>
                   </div>
                 </form>
               </section>
 
-              {result && (
+              {shouldShowResult && result && (
                 <section className={styles.resultCard}>
                   <div>
                     <p className={styles.resultLabel}>Prediction</p>
                     <p className={styles.resultValue}>{result.label.replace("_", " ")}</p>
                   </div>
                   <div>
-                    <p className={styles.resultLabel}>Confidence</p>
-                    <p className={styles.resultValue}>{confidenceLabel}</p>
+                    <p className={styles.resultLabel}>
+                      {selectedModel === "xlm-roberta" ? "Confidence" : "Explanation"}
+                    </p>
+                    <p
+                      className={`${styles.resultValue} ${
+                        selectedModel === "xlm-roberta" ? "" : styles.resultValueSmall
+                      }`}
+                    >
+                      {selectedModel === "xlm-roberta" ? confidenceLabel : explanationText}
+                    </p>
                   </div>
                 </section>
               )}

@@ -17,6 +17,34 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
+### Backend configuration
+
+Create a local env file before starting the backend:
+
+```bash
+cp .env.example .env
+```
+
+The backend reads these variables from `backend/.env` or `backend/.env.local`:
+
+- `MODEL_DIR`: path to the local XLM-RoBERTa checkpoint.
+- `LEMMAS_DIR`: path to the DiMi lemma files.
+- `OPENAI_API_KEY`: OpenAI API credential for the OpenAI branch.
+- `OPENAI_MODEL`: OpenAI chat model name, default `gpt-4o-mini`.
+- `ANTHROPIC_API_KEY`: reserved for the Claude branch.
+- `ANTHROPIC_MODEL`: reserved Claude model name, default `claude-3-5-sonnet-latest`.
+
+Example:
+
+```bash
+export MODEL_DIR=/absolute/path/to/checkpoint-1473
+export LEMMAS_DIR=/absolute/path/to/dimi
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=gpt-4o-mini
+export ANTHROPIC_API_KEY=...
+export ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+```
+
 The backend loads the model from:
 
 ```

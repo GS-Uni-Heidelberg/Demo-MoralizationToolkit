@@ -207,6 +207,12 @@
   text-transform: capitalize;
 }
 
+.resultValueSmall {
+  font-size: 15px;
+  line-height: 1.5;
+  text-transform: none;
+}
+
 .errorMessage {
   font-family: var(--font-sans);
   color: #a12b2b;
