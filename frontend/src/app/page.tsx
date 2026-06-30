@@ -99,6 +99,12 @@ const BATCH_MODEL_SUFFIXES: Record<ModelCode, string> = {
   openai: "openai",
 };
 
+const BATCH_MODEL_COLORS: Record<ModelCode, string> = {
+  "xlm-roberta": "#f2c479",
+  claude: "#6caac9",
+  openai: "#c86a5a",
+};
+
 
 const parseCsvText = (text: string): string[][] => {
   const rows: string[][] = [];
@@ -230,6 +236,7 @@ export default function Home() {
   );
   const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState<number>(0);
+  const [metricsHoveredModel, setMetricsHoveredModel] = useState<ModelCode | null>(null);
   const batchDimiRunIdRef = useRef(0);
 
   const clearBatchRunState = () => {
@@ -406,6 +413,33 @@ export default function Home() {
     () => estimateRemainingTime(batchStartedAt, batchProgress),
     [batchStartedAt, batchProgress, clockTick]
   );
+  const batchMetricComparison = useMemo(() => {
+    if (!batchMetrics) return [];
+
+    return batchModels.flatMap((modelCode) => {
+      const suffix = BATCH_MODEL_SUFFIXES[modelCode];
+      const metrics = batchMetrics[suffix];
+      if (!metrics) return [];
+
+      const modelLabel =
+        MODEL_OPTIONS.find((option) => option.code === modelCode)?.label ?? suffix;
+      const f1Value = Number.parseFloat(metrics.f1);
+
+      return [
+        {
+          modelCode,
+          modelLabel,
+          suffix,
+          f1Value: Number.isFinite(f1Value) ? f1Value : 0,
+          metrics,
+        },
+      ];
+    });
+  }, [batchMetrics, batchModels]);
+  const activeMetricComparison =
+    batchMetricComparison.find((item) => item.modelCode === metricsHoveredModel) ??
+    batchMetricComparison[0] ??
+    null;
 
   const shouldShowResult =
     result !== null && resultModel === selectedModel && resultLanguage === lmLanguage;
@@ -1887,9 +1921,6 @@ export default function Home() {
                               {batchModels.includes("xlm-roberta") && batchLanguage !== "de" && (
                                 <p className={styles.modelWarning}>{xlmWarning}</p>
                               )}
-                              <p className={styles.hint}>
-                                Each selected model is exported into its own prediction columns.
-                              </p>
                             </div>
                           )}
 
@@ -2162,6 +2193,53 @@ export default function Home() {
                   ) : (
                     <p className={styles.previewEmpty}>{outputPreviewNote}</p>
                   )}
+                </div>
+              )}
+
+              {batchMetricComparison.length > 0 && (
+                <div className={`${styles.previewCard} ${styles.previewDark} ${styles.metricsChartCard}`}>
+                  <div className={styles.metricsChartHeader}>
+                    <span className={styles.metricsTitle}>F1 comparison</span>
+                    <span className={styles.metricsChartHint}>
+                      F1 Score comparison between the models.
+                    </span>
+                  </div>
+
+                  <div className={styles.metricsChart} role="list" aria-label="Model F1 comparison">
+                    {batchMetricComparison.map((item) => {
+                      const isActive = activeMetricComparison?.modelCode === item.modelCode;
+                      const barHeight = Math.max(item.f1Value * 100, 6);
+
+                      return (
+                        <button
+                          key={item.suffix}
+                          type="button"
+                          className={`${styles.metricsBarGroup} ${
+                            isActive ? styles.metricsBarGroupActive : ""
+                          }`}
+                          role="listitem"
+                          onMouseEnter={() => setMetricsHoveredModel(item.modelCode)}
+                          onFocus={() => setMetricsHoveredModel(item.modelCode)}
+                          onMouseLeave={() => setMetricsHoveredModel(null)}
+                          onBlur={() => setMetricsHoveredModel(null)}
+                          aria-label={`${item.modelLabel} F1 ${(item.f1Value * 100).toFixed(2)}%`}
+                        >
+                          <div className={styles.metricsBarTrack}>
+                            <div
+                              className={styles.metricsBarFill}
+                              style={{
+                                height: `${barHeight}%`,
+                                backgroundColor: BATCH_MODEL_COLORS[item.modelCode],
+                              }}
+                            />
+                          </div>
+                          <div className={styles.metricsBarLabel}>{item.modelLabel}</div>
+                          <div className={styles.metricsBarValue}>{(item.f1Value * 100).toFixed(2)}%</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
                 </div>
               )}
 

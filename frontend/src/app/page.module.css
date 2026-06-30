@@ -220,6 +220,116 @@
   text-transform: none;
 }
 
+.metricsChartCard {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: #0a1823;
+}
+
+.metricsChartHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.metricsChartHint {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: rgba(249, 244, 236, 0.72);
+}
+
+.metricsChart {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 14px;
+  align-items: end;
+  min-height: 220px;
+  padding: 18px 16px 14px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(249, 244, 236, 0.08), rgba(249, 244, 236, 0.03)),
+    linear-gradient(180deg, rgba(249, 244, 236, 0.05) 1px, transparent 1px);
+  background-size: auto, 100% 36px;
+  border: 1px solid rgba(249, 244, 236, 0.08);
+  overflow: hidden;
+}
+
+.metricsBarGroup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+
+.metricsBarGroup:focus-visible {
+  outline: 2px solid rgba(242, 196, 121, 0.8);
+  outline-offset: 6px;
+  border-radius: 16px;
+}
+
+.metricsBarTrack {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  overflow: visible;
+}
+
+.metricsBarFill {
+  width: min(56px, 58%);
+  border-radius: 16px 16px 8px 8px;
+  background: #f2c479;
+  box-shadow: 0 10px 24px rgba(10, 24, 35, 0.22);
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.metricsBarGroup:hover .metricsBarFill,
+.metricsBarGroupActive .metricsBarFill {
+  transform: translateY(-2px);
+  filter: saturate(1.1) brightness(1.03);
+}
+
+.metricsBarLabel {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #f9f4ec;
+}
+
+.metricsBarValue {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: rgba(249, 244, 236, 0.78);
+}
+
+.metricsChartDetail {
+  margin: 0;
+  padding-top: 2px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(249, 244, 236, 0.82);
+}
+
+.metricsChartDetail strong {
+  color: #fff8cc;
+}
+
 .errorMessage {
   font-family: var(--font-sans);
   color: #a12b2b;
