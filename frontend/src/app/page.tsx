@@ -58,7 +58,7 @@ type BatchStatusResponse = {
   processed: number;
   total: number;
   progress: number;
-  metrics?: BatchMetrics;
+  metrics?: Record<string, BatchMetrics>;
   error?: string;
 };
 
@@ -92,6 +92,12 @@ const MODEL_OPTIONS: Array<{
   { code: "claude", label: "Claude Haiku 4.5", name: "Claude Haiku 4.5" },
   { code: "openai", label: "OpenAI GPT-5 mini", name: "OpenAI GPT-5 mini" },
 ];
+
+const BATCH_MODEL_SUFFIXES: Record<ModelCode, string> = {
+  "xlm-roberta": "roberta-finetuned",
+  claude: "claude",
+  openai: "openai",
+};
 
 
 const parseCsvText = (text: string): string[][] => {
@@ -215,7 +221,7 @@ export default function Home() {
   const [inputPreviewJson, setInputPreviewJson] = useState<string | null>(null);
   const [outputPreview, setOutputPreview] = useState<string[][]>([]);
   const [outputPreviewJson, setOutputPreviewJson] = useState<string | null>(null);
-  const [batchMetrics, setBatchMetrics] = useState<BatchMetrics | null>(null);
+  const [batchMetrics, setBatchMetrics] = useState<Record<string, BatchMetrics> | null>(null);
   const [inputPreviewNote, setInputPreviewNote] = useState<string | null>(
     "Upload a CSV or JSON file to see a preview."
   );
@@ -1166,15 +1172,28 @@ export default function Home() {
 
   const handleMetricsDownload = () => {
     if (!batchMetrics || !batchOutputFormat) return;
-    const header = "accuracy,precision,recall,f1,tp,fp,tn,fn";
-    const row =
-      `${batchMetrics.accuracy},${batchMetrics.precision},` +
-      `${batchMetrics.recall},${batchMetrics.f1},${batchMetrics.tp},` +
-      `${batchMetrics.fp},${batchMetrics.tn},${batchMetrics.fn}`;
+    const entries = Object.entries(batchMetrics);
+    const header = "model,accuracy,precision,recall,f1,tp,fp,tn,fn";
     const metricsText =
       batchOutputFormat === "json"
         ? JSON.stringify(batchMetrics, null, 2)
-        : `${header}\n${row}`;
+        : [
+            header,
+            ...entries.map(
+              ([modelName, metrics]) =>
+                [
+                  modelName,
+                  metrics.accuracy,
+                  metrics.precision,
+                  metrics.recall,
+                  metrics.f1,
+                  metrics.tp,
+                  metrics.fp,
+                  metrics.tn,
+                  metrics.fn,
+                ].join(",")
+            ),
+          ].join("\n");
     const metricsBlob = new Blob([metricsText], {
       type: batchOutputFormat === "json" ? "application/json" : "text/csv",
     });
@@ -2146,43 +2165,53 @@ export default function Home() {
                 </div>
               )}
 
-              {batchMetrics && (
-                <div className={`${styles.resultCard} ${styles.metricsCard}`}>
-                  <span className={styles.metricsTitle}>Metrics</span>
-                  <div>
-                    <p className={styles.resultLabel}>Accuracy</p>
-                    <p className={styles.resultValue}>{batchMetrics.accuracy}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>Precision</p>
-                    <p className={styles.resultValue}>{batchMetrics.precision}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>Recall</p>
-                    <p className={styles.resultValue}>{batchMetrics.recall}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>F1</p>
-                    <p className={styles.resultValue}>{batchMetrics.f1}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>TP</p>
-                    <p className={styles.resultValue}>{batchMetrics.tp}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>FP</p>
-                    <p className={styles.resultValue}>{batchMetrics.fp}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>TN</p>
-                    <p className={styles.resultValue}>{batchMetrics.tn}</p>
-                  </div>
-                  <div>
-                    <p className={styles.resultLabel}>FN</p>
-                    <p className={styles.resultValue}>{batchMetrics.fn}</p>
-                  </div>
-                </div>
-              )}
+              {batchMetrics &&
+                batchModels.map((modelCode) => {
+                  const suffix = BATCH_MODEL_SUFFIXES[modelCode];
+                  const metrics = batchMetrics[suffix];
+                  if (!metrics) return null;
+
+                  const modelLabel =
+                    MODEL_OPTIONS.find((option) => option.code === modelCode)?.label ?? suffix;
+
+                  return (
+                    <div key={suffix} className={`${styles.resultCard} ${styles.metricsCard}`}>
+                      <span className={styles.metricsTitle}>Metrics - {modelLabel}</span>
+                      <div>
+                        <p className={styles.resultLabel}>Accuracy</p>
+                        <p className={styles.resultValue}>{metrics.accuracy}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>Precision</p>
+                        <p className={styles.resultValue}>{metrics.precision}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>Recall</p>
+                        <p className={styles.resultValue}>{metrics.recall}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>F1</p>
+                        <p className={styles.resultValue}>{metrics.f1}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>TP</p>
+                        <p className={styles.resultValue}>{metrics.tp}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>FP</p>
+                        <p className={styles.resultValue}>{metrics.fp}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>TN</p>
+                        <p className={styles.resultValue}>{metrics.tn}</p>
+                      </div>
+                      <div>
+                        <p className={styles.resultLabel}>FN</p>
+                        <p className={styles.resultValue}>{metrics.fn}</p>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
 
             {(batchDownloadUrl || batchMetrics) && (

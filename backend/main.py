@@ -151,7 +151,7 @@ class BatchJob:
         self.processed = 0
         self.status = "queued"
         self.error: str | None = None
-        self.metrics: dict[str, str] | None = None
+        self.metrics: dict[str, dict[str, str]] | None = None
         self.result_bytes: bytes | None = None
         self.result_json: dict[str, object] | None = None
 
@@ -1002,8 +1002,10 @@ def compute_metrics(true_labels: list[int], predicted_labels: list[int]) -> dict
 def run_batch_job(job: BatchJob) -> None:
     job.status = "running"
     results = []
-    metric_true_labels: list[int] = []
-    metric_predicted_labels: list[int] = []
+    metric_true_labels_by_model: dict[str, list[int]] = {model_code: [] for model_code in job.models}
+    metric_predicted_labels_by_model: dict[str, list[int]] = {
+        model_code: [] for model_code in job.models
+    }
     reserved_fields = {
         "id",
         "text",
@@ -1026,8 +1028,6 @@ def run_batch_job(job: BatchJob) -> None:
     output_extra_fieldnames = [
         name for name in job.extra_fieldnames if name not in reserved_fields
     ]
-    metric_model_code = job.models[0] if len(job.models) == 1 else None
-
     for index, text in enumerate(job.texts, start=1):
         dimi_match_count = job.dimi_matches[index - 1] if index - 1 < len(job.dimi_matches) else 0
         skip_no_dimi = job.skip_no_dimi_matches and dimi_match_count == 0
@@ -1064,9 +1064,9 @@ def run_batch_job(job: BatchJob) -> None:
                     result_item[f"explanation_{suffix}"] = prediction.explanation
                     result_item[f"raw_output_{suffix}"] = prediction.raw_output
 
-                if job.labels and model_code == metric_model_code:
-                    metric_true_labels.append(job.labels[index - 1])
-                    metric_predicted_labels.append(label_to_binary(prediction.label))
+                if job.labels:
+                    metric_true_labels_by_model[model_code].append(job.labels[index - 1])
+                    metric_predicted_labels_by_model[model_code].append(label_to_binary(prediction.label))
 
         if "full_text" in input_extras:
             result_item["full_text"] = input_extras.get("full_text", text)
@@ -1081,10 +1081,17 @@ def run_batch_job(job: BatchJob) -> None:
         results.append(result_item)
         job.processed = index
 
-    if job.labels and metric_true_labels:
-        job.metrics = compute_metrics(metric_true_labels, metric_predicted_labels)
-    elif job.labels:
-        job.metrics = None
+    if job.labels:
+        metrics_by_model: dict[str, dict[str, str]] = {}
+        for model_code in job.models:
+            true_labels = metric_true_labels_by_model[model_code]
+            predicted_labels = metric_predicted_labels_by_model[model_code]
+            if true_labels:
+                metrics_by_model[get_model_suffix(model_code)] = compute_metrics(
+                    true_labels,
+                    predicted_labels,
+                )
+        job.metrics = metrics_by_model or None
 
     if job.output_format == "json":
         job.result_json = {"results": results}
