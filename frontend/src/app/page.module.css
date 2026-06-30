@@ -350,6 +350,14 @@
   width: fit-content;
 }
 
+.batchModelTabs {
+  flex-wrap: wrap;
+}
+
+.lmModelTabs {
+  flex-wrap: wrap;
+}
+
 .modeTab {
   border: none;
   border-radius: 999px;
@@ -1034,6 +1042,30 @@
   .actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .batchModelTabs {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .batchModelTabs .modeTab {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .lmModelTabs {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .lmModelTabs .modeTab {
+    width: 100%;
+    justify-content: center;
   }
 
   .metricsCard {

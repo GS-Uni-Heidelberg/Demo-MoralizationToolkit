@@ -1670,7 +1670,7 @@ export default function Home() {
                   </div>
                   <div className={styles.languageSwitch}>
                     <span className={styles.label}>Model</span>
-                    <div className={styles.modeTabs}>
+                    <div className={`${styles.modeTabs} ${styles.lmModelTabs}`}>
                       {MODEL_OPTIONS.map((option) => {
                         const isWarned = option.code === "xlm-roberta" && lmLanguage !== "de";
 
@@ -1899,7 +1899,7 @@ export default function Home() {
                             <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                               <div className={styles.languageSwitch}>
                                 <span className={styles.label}>Select models...</span>
-                                <div className={styles.modeTabs}>
+                                <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
                                   {MODEL_OPTIONS.map((option) => (
                                     <button
                                       key={option.code}
