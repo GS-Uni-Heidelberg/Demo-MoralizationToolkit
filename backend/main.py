@@ -48,6 +48,12 @@ ANTHROPIC_CLIENT = None
 OPENAI_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "openai"
 ANTHROPIC_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "anthropic"
 
+MODEL_COLUMN_SUFFIXES = {
+    "xlm-roberta": MODEL_NAME,
+    "claude": "claude",
+    "openai": "openai",
+}
+
 LEMMAS_DIR = Path(os.environ.get("LEMMAS_DIR", ROOT_DIR / "models" / "dimi"))
 
 app = FastAPI(title="Moralization Detection API")
@@ -88,6 +94,14 @@ class PredictResponse(BaseModel):
     explanation: str | None = None
 
 
+@dataclass
+class ModelPredictionResult:
+    label: str
+    confidence: float | None = None
+    explanation: str | None = None
+    raw_output: str | None = None
+
+
 # ── LEMMATIZER MODELS ─────────────────────────────────────────────────────────
 
 
@@ -114,6 +128,7 @@ class BatchJob:
         self,
         job_id: str,
         output_format: str,
+        models: list[str],
         texts: list[str],
         labels: list[int] | None,
         ids: list[str],
@@ -124,6 +139,7 @@ class BatchJob:
     ) -> None:
         self.job_id = job_id
         self.output_format = output_format
+        self.models = models
         self.texts = texts
         self.labels = labels
         self.ids = ids
@@ -259,7 +275,7 @@ def analyze_with_openai(
     model: str,
     max_retries: int = 3,
     retry_delay: float = 2.0,
-) -> tuple[dict, float]:
+) -> tuple[dict, float, str]:
     prompt = user_prompt.format(text=text)
 
     for attempt in range(max_retries):
@@ -283,7 +299,7 @@ def analyze_with_openai(
             except json.JSONDecodeError:
                 print(f"Raw OpenAI response that failed to parse: {content}")
                 raise
-            return data, generation_time
+            return data, generation_time, content
         except Exception as exc:
             if attempt < max_retries - 1:
                 print(f"Retrying ({attempt + 1}/{max_retries}) after error: {exc}")
@@ -300,7 +316,7 @@ def analyze_with_anthropic(
     model: str,
     max_retries: int = 3,
     retry_delay: float = 2.0,
-) -> tuple[dict, float]:
+) -> tuple[dict, float, str]:
     prompt = user_prompt.format(text=text)
 
     for attempt in range(max_retries):
@@ -325,7 +341,7 @@ def analyze_with_anthropic(
             except json.JSONDecodeError:
                 print(f"Raw Anthropic response that failed to parse: {content}")
                 raise
-            return data, generation_time
+            return data, generation_time, content
         except Exception as exc:
             if attempt < max_retries - 1:
                 print(f"Retrying ({attempt + 1}/{max_retries}) after error: {exc}")
@@ -410,6 +426,72 @@ def parse_prediction_payload(payload: dict) -> PredictResponse:
 
     confidence = max(0.0, min(1.0, confidence))
     return PredictResponse(label=label, confidence=round(confidence, 4))
+
+
+def normalize_model_codes(models: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for model in models:
+        code = str(model).strip().lower()
+        if not code:
+            continue
+        if code not in MODEL_COLUMN_SUFFIXES:
+            raise ValueError(f"Unknown model: {model}")
+        if code in seen:
+            continue
+        seen.add(code)
+        normalized.append(code)
+
+    if not normalized:
+        raise ValueError("At least one model must be selected.")
+
+    return normalized
+
+
+def get_model_suffix(model_code: str) -> str:
+    return MODEL_COLUMN_SUFFIXES[model_code]
+
+
+def run_model_prediction(text: str, model_code: str) -> ModelPredictionResult:
+    if model_code == "xlm-roberta":
+        prediction = MODEL.predict(text)
+        return ModelPredictionResult(
+            label=prediction.label,
+            confidence=prediction.confidence,
+        )
+
+    if model_code == "claude":
+        payload, _generation_time, raw_output = analyze_with_anthropic(
+            text=text,
+            sys_prompt=ANTHROPIC_SYSTEM_PROMPT,
+            user_prompt=ANTHROPIC_USER_PROMPT,
+            response_format=ANTHROPIC_RESPONSE_FORMAT,
+            model=ANTHROPIC_MODEL,
+        )
+        prediction = parse_prediction_payload(payload)
+        return ModelPredictionResult(
+            label=prediction.label,
+            explanation=prediction.explanation,
+            raw_output=raw_output,
+        )
+
+    if model_code == "openai":
+        payload, _generation_time, raw_output = analyze_with_openai(
+            text=text,
+            sys_prompt=OPENAI_SYSTEM_PROMPT,
+            user_prompt=OPENAI_USER_PROMPT,
+            response_format=OPENAI_RESPONSE_FORMAT,
+            model=OPENAI_MODEL,
+        )
+        prediction = parse_prediction_payload(payload)
+        return ModelPredictionResult(
+            label=prediction.label,
+            explanation=prediction.explanation,
+            raw_output=raw_output,
+        )
+
+    raise ValueError(f"Unknown model: {model_code}")
 
 
 # ── LEMMA LOADER ──────────────────────────────────────────────────────────────
@@ -927,29 +1009,28 @@ def run_batch_job(job: BatchJob) -> None:
         "text",
         "full_text",
         "label",
-        f"prediction_{MODEL_NAME}",
-        f"confidence_{MODEL_NAME}",
         "dimi_matches",
         "dimi_matched_lemmas",
         "no_dimi_match",
     }
+    for model_code in job.models:
+        suffix = get_model_suffix(model_code)
+        reserved_fields.update(
+            {
+                f"prediction_{suffix}",
+                f"confidence_{suffix}",
+                f"explanation_{suffix}",
+                f"raw_output_{suffix}",
+            }
+        )
     output_extra_fieldnames = [
         name for name in job.extra_fieldnames if name not in reserved_fields
     ]
+    metric_model_code = job.models[0] if len(job.models) == 1 else None
 
     for index, text in enumerate(job.texts, start=1):
         dimi_match_count = job.dimi_matches[index - 1] if index - 1 < len(job.dimi_matches) else 0
         skip_no_dimi = job.skip_no_dimi_matches and dimi_match_count == 0
-        prediction_label = "no_dimi"
-        confidence_str: str | None = None
-
-        if not skip_no_dimi:
-            prediction = MODEL.predict(text)
-            prediction_label = prediction.label
-            confidence_str = f"{prediction.confidence:.4f}"
-            if job.labels:
-                metric_true_labels.append(job.labels[index - 1])
-                metric_predicted_labels.append(label_to_binary(prediction.label))
 
         input_extras = job.extras[index - 1]
         result_item: dict[str, object] = {
@@ -960,8 +1041,32 @@ def run_batch_job(job: BatchJob) -> None:
             result_item["label"] = (
                 "moralization" if job.labels[index - 1] == 1 else "no_moralization"
             )
-        result_item[f"prediction_{MODEL_NAME}"] = prediction_label
-        result_item[f"confidence_{MODEL_NAME}"] = confidence_str
+
+        for model_code in job.models:
+            suffix = get_model_suffix(model_code)
+            result_item[f"prediction_{suffix}"] = "no_dimi"
+            if model_code == "xlm-roberta":
+                result_item[f"confidence_{suffix}"] = None
+            else:
+                result_item[f"explanation_{suffix}"] = None
+                result_item[f"raw_output_{suffix}"] = None
+
+        if not skip_no_dimi:
+            for model_code in job.models:
+                suffix = get_model_suffix(model_code)
+                prediction = run_model_prediction(text, model_code)
+                result_item[f"prediction_{suffix}"] = prediction.label
+                if model_code == "xlm-roberta":
+                    result_item[f"confidence_{suffix}"] = (
+                        f"{prediction.confidence:.4f}" if prediction.confidence is not None else None
+                    )
+                else:
+                    result_item[f"explanation_{suffix}"] = prediction.explanation
+                    result_item[f"raw_output_{suffix}"] = prediction.raw_output
+
+                if job.labels and model_code == metric_model_code:
+                    metric_true_labels.append(job.labels[index - 1])
+                    metric_predicted_labels.append(label_to_binary(prediction.label))
 
         if "full_text" in input_extras:
             result_item["full_text"] = input_extras.get("full_text", text)
@@ -994,7 +1099,14 @@ def run_batch_job(job: BatchJob) -> None:
                 fieldnames.append("dimi_matches")
             if "dimi_matched_lemmas" in job.extra_fieldnames:
                 fieldnames.append("dimi_matched_lemmas")
-            fieldnames.extend(["label", f"prediction_{MODEL_NAME}", f"confidence_{MODEL_NAME}"])
+            fieldnames.append("label")
+            for model_code in job.models:
+                suffix = get_model_suffix(model_code)
+                fieldnames.append(f"prediction_{suffix}")
+                if model_code == "xlm-roberta":
+                    fieldnames.append(f"confidence_{suffix}")
+                else:
+                    fieldnames.extend([f"explanation_{suffix}", f"raw_output_{suffix}"])
             fieldnames.extend(output_extra_fieldnames)
         else:
             fieldnames = ["id", "text"]
@@ -1005,7 +1117,13 @@ def run_batch_job(job: BatchJob) -> None:
                 fieldnames.append("dimi_matches")
             if "dimi_matched_lemmas" in job.extra_fieldnames:
                 fieldnames.append("dimi_matched_lemmas")
-            fieldnames.extend([f"prediction_{MODEL_NAME}", f"confidence_{MODEL_NAME}"])
+            for model_code in job.models:
+                suffix = get_model_suffix(model_code)
+                fieldnames.append(f"prediction_{suffix}")
+                if model_code == "xlm-roberta":
+                    fieldnames.append(f"confidence_{suffix}")
+                else:
+                    fieldnames.extend([f"explanation_{suffix}", f"raw_output_{suffix}"])
             fieldnames.extend(output_extra_fieldnames)
 
         deduped_fieldnames: list[str] = []
@@ -1075,29 +1193,12 @@ async def predict(request: PredictRequest) -> PredictResponse:
 
     try:
         selected_model = request.model.strip().lower()
-
-        if selected_model == "xlm-roberta":
-            return MODEL.predict(request.text)
-        elif selected_model == "claude":
-            payload, _generation_time = analyze_with_anthropic(
-                text=request.text,
-                sys_prompt=ANTHROPIC_SYSTEM_PROMPT,
-                user_prompt=ANTHROPIC_USER_PROMPT,
-                response_format=ANTHROPIC_RESPONSE_FORMAT,
-                model=ANTHROPIC_MODEL,
-            )
-            return parse_prediction_payload(payload)
-        elif selected_model == "openai":
-            payload, _generation_time = analyze_with_openai(
-                text=request.text,
-                sys_prompt=OPENAI_SYSTEM_PROMPT,
-                user_prompt=OPENAI_USER_PROMPT,
-                response_format=OPENAI_RESPONSE_FORMAT,
-                model=OPENAI_MODEL,
-            )
-            return parse_prediction_payload(payload)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
+        prediction = run_model_prediction(request.text, selected_model)
+        return PredictResponse(
+            label=prediction.label,
+            confidence=prediction.confidence if prediction.confidence is not None else 0.0,
+            explanation=prediction.explanation,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1108,6 +1209,7 @@ async def predict(request: PredictRequest) -> PredictResponse:
 async def batch_start(
     file: UploadFile = File(...),
     output_format: str = Form("csv"),
+    models: list[str] = Form(["xlm-roberta"]),
     skip_no_dimi_matches: str = Form("false"),
 ) -> dict[str, str]:
     if MODEL_ERROR or MODEL is None:
@@ -1139,12 +1241,18 @@ async def batch_start(
     if fmt not in {"csv", "json"}:
         raise HTTPException(status_code=400, detail="Unsupported output format")
 
+    try:
+        selected_models = normalize_model_codes(models)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     skip_flag = parse_bool_flag(skip_no_dimi_matches)
 
     job_id = str(uuid.uuid4())
     job = BatchJob(
         job_id=job_id,
         output_format=fmt,
+        models=selected_models,
         texts=texts,
         labels=labels,
         ids=ids,

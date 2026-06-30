@@ -190,6 +190,7 @@ export default function Home() {
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
   const [batchOutputFormat, setBatchOutputFormat] = useState<"csv" | "json" | null>(null);
   const [batchLanguage, setBatchLanguage] = useState<LanguageCode | null>(null);
+  const [batchModels, setBatchModels] = useState<ModelCode[]>(["xlm-roberta"]);
   const [batchDimiStatus, setBatchDimiStatus] = useState<BatchDimiStatus>("idle");
   const [batchDimiError, setBatchDimiError] = useState<string | null>(null);
   const [batchDimiProgress, setBatchDimiProgress] = useState<number>(0);
@@ -326,6 +327,34 @@ export default function Home() {
     );
   };
 
+  const handleBatchModelToggle = (modelCode: ModelCode) => {
+    const nextModels = batchModels.includes(modelCode)
+      ? batchModels.filter((code) => code !== modelCode)
+      : [...batchModels, modelCode];
+
+    if (nextModels.length === 0) {
+      return;
+    }
+
+    const hasChanged =
+      nextModels.length !== batchModels.length ||
+      nextModels.some((code, index) => code !== batchModels[index]);
+
+    if (!hasChanged) {
+      return;
+    }
+
+    if (hasBatchResultState()) {
+      const ok = confirmBatchReset(
+        "Changing the selected models will reset the current batch results. Continue?"
+      );
+      if (!ok) return;
+      clearBatchRunState();
+    }
+
+    setBatchModels(nextModels);
+  };
+
   const isDisabled = status === "loading" || text.trim().length === 0;
   const isTextTooLong = text.length > MAX_TEXT_LENGTH;
   const isSingleAnalyzeDisabled = isDisabled || isTextTooLong;
@@ -435,6 +464,7 @@ export default function Home() {
     setDimiResult(null);
     setDimiCopied({});
     clearBatchDimiState();
+    setBatchModels(["xlm-roberta"]);
 
     setBatchFile(null);
     setBatchStatus("idle");
@@ -1000,6 +1030,7 @@ export default function Home() {
   const handleBatchSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!batchFile || !batchOutputFormat || !batchLanguage || !batchDimiPreparedFile) return;
+    if (batchModels.length === 0) return;
 
     if (hasBatchResultState()) {
       const ok = confirmBatchReset(
@@ -1029,6 +1060,7 @@ export default function Home() {
       formData.append("output_format", batchOutputFormat);
       formData.append("language", batchLanguage);
       formData.append("skip_no_dimi_matches", String(skipNoDimiMatches));
+      batchModels.forEach((modelCode) => formData.append("models", modelCode));
 
       const response = await fetch("http://localhost:8000/batch/start", {
         method: "POST",
@@ -1811,6 +1843,36 @@ export default function Home() {
                   </div>
                 </div>
               )}
+
+                          {batchFile && batchOutputFormat && batchLanguage && (
+                            <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                              <div className={styles.languageSwitch}>
+                                <span className={styles.label}>Select models...</span>
+                                <div className={styles.modeTabs}>
+                                  {MODEL_OPTIONS.map((option) => (
+                                    <button
+                                      key={option.code}
+                                      className={`${styles.modeTab} ${
+                                        batchModels.includes(option.code) ? styles.modeTabActive : ""
+                                      }`}
+                                      type="button"
+                                      onClick={() => handleBatchModelToggle(option.code)}
+                                      aria-pressed={batchModels.includes(option.code)}
+                                      title={option.name}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {batchModels.includes("xlm-roberta") && batchLanguage !== "de" && (
+                                <p className={styles.modelWarning}>{xlmWarning}</p>
+                              )}
+                              <p className={styles.hint}>
+                                Each selected model is exported into its own prediction columns.
+                              </p>
+                            </div>
+                          )}
 
               {batchFile && batchOutputFormat && batchLanguage && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
