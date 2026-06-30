@@ -225,14 +225,21 @@
   flex-direction: column;
   gap: 18px;
   background: #0a1823;
+  position: relative;
+  padding-top: 36px;
 }
 
 .metricsChartHeader {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.metricsChartCard .metricsTitle {
+  position: static;
+  top: auto;
+  left: auto;
 }
 
 .metricsChartHint {
@@ -242,21 +249,10 @@
 }
 
 .metricsChart {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 14px;
-  align-items: end;
-  min-height: 220px;
-  padding: 18px 16px 14px;
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(249, 244, 236, 0.08), rgba(249, 244, 236, 0.03)),
-    linear-gradient(180deg, rgba(249, 244, 236, 0.05) 1px, transparent 1px);
-  background-size: auto, 100% 36px;
-  border: 1px solid rgba(249, 244, 236, 0.08);
-  overflow: hidden;
+  min-width: 0;
+  width: 100%;
+  height: 320px;
 }
-
 .metricsBarGroup {
   display: flex;
   flex-direction: column;

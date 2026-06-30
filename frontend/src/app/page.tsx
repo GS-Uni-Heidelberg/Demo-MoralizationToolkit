@@ -1,9 +1,12 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 import FloatingKeyButton from "../../components/FloatingKeyButton";
+
+const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 type PredictionResponse = {
   label: string;
@@ -236,7 +239,6 @@ export default function Home() {
   );
   const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState<number>(0);
-  const [metricsHoveredModel, setMetricsHoveredModel] = useState<ModelCode | null>(null);
   const batchDimiRunIdRef = useRef(0);
 
   const clearBatchRunState = () => {
@@ -436,10 +438,6 @@ export default function Home() {
       ];
     });
   }, [batchMetrics, batchModels]);
-  const activeMetricComparison =
-    batchMetricComparison.find((item) => item.modelCode === metricsHoveredModel) ??
-    batchMetricComparison[0] ??
-    null;
 
   const shouldShowResult =
     result !== null && resultModel === selectedModel && resultLanguage === lmLanguage;
@@ -2205,39 +2203,64 @@ export default function Home() {
                     </span>
                   </div>
 
-                  <div className={styles.metricsChart} role="list" aria-label="Model F1 comparison">
-                    {batchMetricComparison.map((item) => {
-                      const isActive = activeMetricComparison?.modelCode === item.modelCode;
-                      const barHeight = Math.max(item.f1Value * 100, 6);
-
-                      return (
-                        <button
-                          key={item.suffix}
-                          type="button"
-                          className={`${styles.metricsBarGroup} ${
-                            isActive ? styles.metricsBarGroupActive : ""
-                          }`}
-                          role="listitem"
-                          onMouseEnter={() => setMetricsHoveredModel(item.modelCode)}
-                          onFocus={() => setMetricsHoveredModel(item.modelCode)}
-                          onMouseLeave={() => setMetricsHoveredModel(null)}
-                          onBlur={() => setMetricsHoveredModel(null)}
-                          aria-label={`${item.modelLabel} F1 ${(item.f1Value * 100).toFixed(2)}%`}
-                        >
-                          <div className={styles.metricsBarTrack}>
-                            <div
-                              className={styles.metricsBarFill}
-                              style={{
-                                height: `${barHeight}%`,
-                                backgroundColor: BATCH_MODEL_COLORS[item.modelCode],
-                              }}
-                            />
-                          </div>
-                          <div className={styles.metricsBarLabel}>{item.modelLabel}</div>
-                          <div className={styles.metricsBarValue}>{(item.f1Value * 100).toFixed(2)}%</div>
-                        </button>
-                      );
-                    })}
+                  <div className={styles.metricsChart}>
+                    <Plot
+                      data={[
+                        {
+                          type: "bar",
+                          x: batchMetricComparison.map((item) => item.modelLabel),
+                          y: batchMetricComparison.map((item) => Math.max(item.f1Value * 100, 2)),
+                          customdata: batchMetricComparison.map((item) => [
+                            (item.f1Value * 100).toFixed(2),
+                          ]),
+                          marker: {
+                            color: batchMetricComparison.map(
+                              (item) => BATCH_MODEL_COLORS[item.modelCode]
+                            ),
+                            line: {
+                              color: "rgba(249, 244, 236, 0.18)",
+                              width: 1,
+                            },
+                          },
+                          hovertemplate:
+                              "%{x}<br>F1: %{customdata[0]}%<extra></extra>",
+                        },
+                      ]}
+                      layout={{
+                        autosize: true,
+                        height: 320,
+                        margin: { l: 60, r: 24, t: 8, b: 70 },
+                        paper_bgcolor: "#0a1823",
+                        plot_bgcolor: "#0a1823",
+                        showlegend: false,
+                        bargap: 0.45,
+                        xaxis: {
+                          tickfont: { color: "#f9f4ec", size: 12 },
+                          showgrid: false,
+                          zeroline: false,
+                        },
+                        yaxis: {
+                          range: [0, 100],
+                          dtick: 20,
+                          ticksuffix: "%",
+                          tickfont: { color: "#f9f4ec", size: 11 },
+                          gridcolor: "rgba(249, 244, 236, 0.14)",
+                          zerolinecolor: "rgba(249, 244, 236, 0.35)",
+                          zerolinewidth: 1,
+                          fixedrange: false,
+                        },
+                        font: {
+                          family: "var(--font-sans)",
+                          color: "#f9f4ec",
+                        },
+                      }}
+                      config={{
+                        responsive: true,
+                        displayModeBar: false,
+                      }}
+                      useResizeHandler
+                      style={{ width: "100%", height: "100%" }}
+                    />
                   </div>
 
                 </div>
