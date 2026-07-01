@@ -16,7 +16,7 @@ from typing import Any, Callable
 import openpyxl
 import stanza
 import torch
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -32,6 +32,27 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if load_dotenv is not None:
     load_dotenv(ROOT_DIR / "backend" / ".env")
     load_dotenv(ROOT_DIR / "backend" / ".env.local", override=True)
+
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
+
+from billing_db import (  # noqa: E402
+    BillingError,
+    CreditLimitError,
+    ProviderNotAllowedError,
+    get_api_token,
+    TokenExpiredError,
+    TokenInactiveError,
+    TokenNotFoundError,
+    charge_credits,
+    charge_batch_credits,
+    create_api_token,
+    get_free_tier_remaining_credits,
+    get_billing_settings,
+    initialize_database,
+    list_api_tokens,
+    list_billing_settings,
+    summarize_batch_credit_need,
+)
 
 DEFAULT_MODEL_DIR = (
     ROOT_DIR
@@ -77,11 +98,14 @@ app.add_middleware(
 )
 
 
+initialize_database()
+
+
 # ── MORALIZATION MODELS ───────────────────────────────────────────────────────
 
 
 class PredictRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=5000)
+    text: str = Field(..., min_length=1, max_length=50_000)
     model: str = Field(
         default="xlm-roberta",
         description="Selected model for moralization prediction.",
@@ -92,6 +116,59 @@ class PredictResponse(BaseModel):
     label: str
     confidence: float
     explanation: str | None = None
+
+
+class ApiTokenCreateRequest(BaseModel):
+    accredited_to: str = Field(..., min_length=1, max_length=200)
+    credits: int = Field(default=100, ge=1, le=1_000_000)
+    note: str | None = Field(default=None, max_length=500)
+    allowed_providers: list[str] | None = None
+    max_batch_instances: int | None = Field(default=None, ge=1)
+    max_input_text_length: int | None = Field(default=None, ge=1)
+    expires_at: str | None = None
+
+
+class ApiTokenCreateResponse(BaseModel):
+    token: str
+    accredited_to: str
+    note: str | None = None
+    credits_remaining: int
+    max_credits: int
+    max_batch_instances: int
+    max_input_text_length: int
+    allowed_providers: list[str]
+    created_at: str
+    expires_at: str | None = None
+
+
+class ApiTokenOverviewResponse(BaseModel):
+    token: str
+    accredited_to: str
+    note: str | None = None
+    credits_remaining: int
+    max_credits: int
+    max_batch_instances: int
+    max_input_text_length: int
+    allowed_providers: list[str]
+    is_active: bool
+    created_at: str
+    expires_at: str | None = None
+
+
+class BillingSettingsResponse(BaseModel):
+    free_tier_daily_credits: int
+    max_batch_instances: int
+    max_input_text_length: int
+    external_request_credit_cost: int
+    local_request_credit_cost: int
+
+
+class BillingStatusResponse(BaseModel):
+    token_type: str
+    credits_remaining: int
+    free_tier_daily_credits: int | None = None
+    max_batch_instances: int | None = None
+    max_input_text_length: int | None = None
 
 
 @dataclass
@@ -136,6 +213,8 @@ class BatchJob:
         extra_fieldnames: list[str],
         dimi_matches: list[int],
         skip_no_dimi_matches: bool,
+        api_token: str | None,
+        billing_credits_used: int,
     ) -> None:
         self.job_id = job_id
         self.output_format = output_format
@@ -147,10 +226,13 @@ class BatchJob:
         self.extra_fieldnames = extra_fieldnames
         self.dimi_matches = dimi_matches
         self.skip_no_dimi_matches = skip_no_dimi_matches
+        self.api_token = api_token
+        self.billing_credits_used = billing_credits_used
         self.total = len(texts)
         self.processed = 0
         self.status = "queued"
         self.error: str | None = None
+        self.billing_error: str | None = None
         self.metrics: dict[str, dict[str, str]] | None = None
         self.result_bytes: bytes | None = None
         self.result_json: dict[str, object] | None = None
@@ -781,6 +863,83 @@ def parse_bool_flag(value: object) -> bool:
     return text in {"1", "true", "yes", "y", "on"}
 
 
+def extract_api_token(
+    x_api_token: str | None = Header(default=None, alias="X-API-Token"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> str | None:
+    if x_api_token and x_api_token.strip():
+        return x_api_token.strip()
+    if authorization:
+        prefix = "bearer "
+        lower_authorization = authorization.strip().lower()
+        if lower_authorization.startswith(prefix):
+            return authorization.strip()[len(prefix) :].strip() or None
+    return None
+
+
+def is_billable_model(model_code: str) -> bool:
+    return model_code in {"claude", "openai"}
+
+
+def raise_billing_http_error(exc: BillingError) -> None:
+    if isinstance(exc, CreditLimitError):
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    if isinstance(
+        exc,
+        (TokenNotFoundError, TokenInactiveError, TokenExpiredError, ProviderNotAllowedError),
+    ):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def validate_text_length(text: str, max_length: int) -> None:
+    if len(text) > max_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input is too long ({len(text)} chars). Maximum allowed is {max_length}.",
+        )
+
+
+def get_effective_request_limits(api_token: str | None) -> tuple[int, int]:
+    billing_settings = get_billing_settings()
+    if not api_token:
+        return billing_settings.max_batch_instances, billing_settings.max_input_text_length
+
+    token_record = get_api_token(api_token)
+    if token_record is None:
+        return billing_settings.max_batch_instances, billing_settings.max_input_text_length
+
+    max_batch_instances = token_record.max_batch_instances or billing_settings.max_batch_instances
+    max_input_text_length = (
+        token_record.max_input_text_length or billing_settings.max_input_text_length
+    )
+    return max_batch_instances, max_input_text_length
+
+
+def get_billing_status(api_token: str | None) -> BillingStatusResponse:
+    billing_settings = get_billing_settings()
+    if not api_token:
+        remaining_credits, free_tier_daily_credits = get_free_tier_remaining_credits()
+        return BillingStatusResponse(
+            token_type="free_tier",
+            credits_remaining=remaining_credits,
+            free_tier_daily_credits=free_tier_daily_credits,
+            max_batch_instances=billing_settings.max_batch_instances,
+            max_input_text_length=billing_settings.max_input_text_length,
+        )
+
+    token_record = get_api_token(api_token)
+    if token_record is None:
+        raise HTTPException(status_code=403, detail="API token not found.")
+
+    return BillingStatusResponse(
+        token_type="api_token",
+        credits_remaining=token_record.credits_remaining,
+        max_batch_instances=token_record.max_batch_instances,
+        max_input_text_length=token_record.max_input_text_length,
+    )
+
+
 def parse_csv_texts(
     raw_bytes: bytes,
 ) -> tuple[
@@ -1093,6 +1252,17 @@ def run_batch_job(job: BatchJob) -> None:
                 )
         job.metrics = metrics_by_model or None
 
+    if job.billing_credits_used > 0:
+        try:
+            charge_batch_credits(
+                api_token=job.api_token,
+                providers=[model_code for model_code in job.models if is_billable_model(model_code)],
+                credits_used=job.billing_credits_used,
+                request_kind="batch",
+            )
+        except BillingError as exc:
+            job.billing_error = str(exc)
+
     if job.output_format == "json":
         job.result_json = {"results": results}
     else:
@@ -1193,13 +1363,100 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/settings", response_model=BillingSettingsResponse)
+async def get_settings() -> BillingSettingsResponse:
+    return BillingSettingsResponse(**list_billing_settings())
+
+
+@app.get("/billing/status", response_model=BillingStatusResponse)
+async def billing_status(
+    api_token: str | None = Depends(extract_api_token),
+) -> BillingStatusResponse:
+    return get_billing_status(api_token)
+
+
+@app.post("/admin/api-tokens", response_model=ApiTokenCreateResponse)
+async def create_token(
+    request: ApiTokenCreateRequest,
+    admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+) -> ApiTokenCreateResponse:
+    if ADMIN_API_KEY and admin_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+
+    try:
+        record = create_api_token(
+            accredited_to=request.accredited_to,
+            credits=request.credits,
+            note=request.note,
+            allowed_providers=request.allowed_providers,
+            max_batch_instances=request.max_batch_instances,
+            max_input_text_length=request.max_input_text_length,
+            expires_at=request.expires_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ApiTokenCreateResponse(
+        token=record.token,
+        accredited_to=record.accredited_to,
+        note=record.note,
+        credits_remaining=record.credits_remaining,
+        max_credits=record.max_credits,
+        max_batch_instances=record.max_batch_instances or 0,
+        max_input_text_length=record.max_input_text_length or 0,
+        allowed_providers=record.allowed_providers,
+        created_at=record.created_at,
+        expires_at=record.expires_at,
+    )
+
+
+@app.get("/admin/api-tokens", response_model=list[ApiTokenOverviewResponse])
+async def list_tokens(
+    admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+) -> list[ApiTokenOverviewResponse]:
+    if ADMIN_API_KEY and admin_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+
+    return [
+        ApiTokenOverviewResponse(
+            token=record.token,
+            accredited_to=record.accredited_to,
+            note=record.note,
+            credits_remaining=record.credits_remaining,
+            max_credits=record.max_credits,
+            max_batch_instances=record.max_batch_instances or 0,
+            max_input_text_length=record.max_input_text_length or 0,
+            allowed_providers=record.allowed_providers,
+            is_active=record.is_active,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+        )
+        for record in list_api_tokens()
+    ]
+
+
 @app.post("/predict", response_model=PredictResponse)
-async def predict(request: PredictRequest) -> PredictResponse:
+async def predict(
+    request: PredictRequest,
+    api_token: str | None = Depends(extract_api_token),
+) -> PredictResponse:
     if MODEL_ERROR or MODEL is None:
         raise HTTPException(status_code=500, detail="Model failed to load")
 
     try:
         selected_model = request.model.strip().lower()
+        _max_batch_instances, max_input_text_length = get_effective_request_limits(api_token)
+        validate_text_length(request.text, max_input_text_length)
+        if is_billable_model(selected_model):
+            try:
+                charge_credits(
+                    api_token=api_token,
+                    provider=selected_model,
+                    credits_used=get_billing_settings().external_request_credit_cost,
+                    request_kind="predict",
+                )
+            except BillingError as exc:
+                raise_billing_http_error(exc)
         prediction = run_model_prediction(request.text, selected_model)
         return PredictResponse(
             label=prediction.label,
@@ -1218,6 +1475,7 @@ async def batch_start(
     output_format: str = Form("csv"),
     models: list[str] = Form(["xlm-roberta"]),
     skip_no_dimi_matches: str = Form("false"),
+    api_token: str | None = Depends(extract_api_token),
 ) -> dict[str, str]:
     if MODEL_ERROR or MODEL is None:
         raise HTTPException(status_code=500, detail="Model failed to load")
@@ -1253,7 +1511,32 @@ async def batch_start(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    max_batch_instances, max_input_text_length = get_effective_request_limits(api_token)
+    if len(texts) > max_batch_instances:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Too many instances: {len(texts)}. Maximum allowed is "
+                f"{max_batch_instances}."
+            ),
+        )
+    for text in texts:
+        validate_text_length(text, max_input_text_length)
+
+    billing_settings = get_billing_settings()
+
     skip_flag = parse_bool_flag(skip_no_dimi_matches)
+
+    eligible_rows = sum(
+        1
+        for match_count in dimi_matches
+        if not skip_flag or int(match_count) > 0
+    )
+    total_credits = summarize_batch_credit_need(
+        eligible_rows=eligible_rows,
+        selected_models=selected_models,
+        settings=billing_settings,
+    )
 
     job_id = str(uuid.uuid4())
     job = BatchJob(
@@ -1267,6 +1550,8 @@ async def batch_start(
         extra_fieldnames=extra_fieldnames,
         dimi_matches=dimi_matches,
         skip_no_dimi_matches=skip_flag,
+        api_token=api_token,
+        billing_credits_used=total_credits,
     )
     with JOB_LOCK:
         JOBS[job_id] = job

@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 backend/.env
 backend/.env.local
+backend/data
 
 # Node
 node_modules/

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
-import FloatingKeyButton from "../../components/FloatingKeyButton";
+import FloatingKeyButton from "@/components/FloatingKeyButton";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -16,6 +16,17 @@ type PredictionResponse = {
 
 type BatchStatus = "idle" | "uploading" | "processing" | "error" | "done";
 type ViewMode = "single" | "batch";
+
+type BillingSettingsResponse = {
+  free_tier_daily_credits: number;
+  external_request_credit_cost: number;
+};
+
+type BillingStatusResponse = {
+  token_type: "free_tier" | "api_token";
+  credits_remaining: number;
+  free_tier_daily_credits?: number | null;
+};
 
 type LanguageCode = "de" | "en" | "fr" | "it";
 type ModelCode = "xlm-roberta" | "claude" | "openai";
@@ -69,6 +80,27 @@ const MAX_PREVIEW_ROWS = 5;
 const MAX_PREVIEW_COLS = 5;
 const MAX_TEXT_LENGTH = 5000;
 const MAX_BATCH_INSTANCES = 200000;
+const API_BASE_URL = "http://localhost:8000";
+const TOKEN_STORAGE_KEY = "apiToken";
+const LEGACY_TOKEN_STORAGE_KEY = "apiKey";
+
+function buildApiHeaders(contentType?: string): HeadersInit {
+  const headers: Record<string, string> = {};
+  if (contentType) {
+    headers["Content-Type"] = contentType;
+  }
+
+  if (typeof window !== "undefined") {
+    const token =
+      localStorage.getItem(TOKEN_STORAGE_KEY) ?? localStorage.getItem(LEGACY_TOKEN_STORAGE_KEY);
+    const trimmedToken = token?.trim();
+    if (trimmedToken) {
+      headers["X-API-Token"] = trimmedToken;
+    }
+  }
+
+  return headers;
+}
 
 const DEFAULT_TEXT =
   "Aber den weiteren Ausgleich, den es dort gibt, den Ausgleich zwischen Arm und Reich, halten wir in der Gesundheitsversicherung für wenig treffsicher und deswegen für sozial ungerecht.";
@@ -238,6 +270,9 @@ export default function Home() {
     "Run a batch request to see the output preview."
   );
   const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
+  const [billingCreditsRemaining, setBillingCreditsRemaining] = useState<number | null>(null);
+  const [billingExternalRequestCreditCost, setBillingExternalRequestCreditCost] = useState(1);
+  const [billingStatusLoaded, setBillingStatusLoaded] = useState(false);
   const [clockTick, setClockTick] = useState<number>(0);
   const batchDimiRunIdRef = useRef(0);
 
@@ -407,6 +442,25 @@ export default function Home() {
     dimiProcessedInstanceCount,
     dimiSkippedInstanceCount,
   ]);
+  const batchBillableModelCount = useMemo(
+    () => batchModels.filter((modelCode) => modelCode !== "xlm-roberta").length,
+    [batchModels]
+  );
+  const batchEstimatedCredits = useMemo(() => {
+    if (lmDetectionInstanceCount === 0 || batchBillableModelCount === 0) {
+      return 0;
+    }
+
+    return lmDetectionInstanceCount * batchBillableModelCount * billingExternalRequestCreditCost;
+  }, [
+    lmDetectionInstanceCount,
+    batchBillableModelCount,
+    billingExternalRequestCreditCost,
+  ]);
+  const batchHasInsufficientCredits =
+    billingStatusLoaded &&
+    billingCreditsRemaining !== null &&
+    batchEstimatedCredits > billingCreditsRemaining;
   const dimiEta = useMemo(
     () => estimateRemainingTime(batchDimiStartedAt, batchDimiProgress),
     [batchDimiStartedAt, batchDimiProgress, clockTick]
@@ -481,6 +535,65 @@ export default function Home() {
     return () => window.clearInterval(intervalId);
   }, [batchStatus, batchDimiStatus]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshBillingInfo = async () => {
+      try {
+        const [settingsResponse, statusResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/settings`),
+          fetch(`${API_BASE_URL}/billing/status`, { headers: buildApiHeaders() }),
+        ]);
+
+        if (cancelled) return;
+
+        if (settingsResponse.ok) {
+          const settings = (await settingsResponse.json()) as BillingSettingsResponse;
+          if (typeof settings.external_request_credit_cost === "number") {
+            setBillingExternalRequestCreditCost(settings.external_request_credit_cost);
+          }
+        }
+
+        if (statusResponse.ok) {
+          const status = (await statusResponse.json()) as BillingStatusResponse;
+          setBillingCreditsRemaining(status.credits_remaining);
+        } else {
+          setBillingCreditsRemaining(null);
+        }
+
+        setBillingStatusLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setBillingStatusLoaded(true);
+        }
+      }
+    };
+
+    void refreshBillingInfo();
+
+    const handleBillingChange = () => {
+      void refreshBillingInfo();
+    };
+
+    const handleFocus = () => {
+      void refreshBillingInfo();
+    };
+
+    window.addEventListener("billingstatuschange", handleBillingChange);
+    window.addEventListener("focus", handleFocus);
+
+    const intervalId = window.setInterval(() => {
+      void refreshBillingInfo();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("billingstatuschange", handleBillingChange);
+      window.removeEventListener("focus", handleFocus);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const resetAppState = () => {
     const ok = window.confirm(
       "Reset the app?\nThis will clear your current progress and cannot be undone!"
@@ -546,9 +659,9 @@ export default function Home() {
     setDimiCopied({});
 
     try {
-      const response = await fetch("http://localhost:8000/lemmatize", {
+      const response = await fetch(`${API_BASE_URL}/lemmatize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildApiHeaders("application/json"),
         body: JSON.stringify({
           text: trimmed,
           language: dimiLanguage,
@@ -591,9 +704,9 @@ export default function Home() {
     const languageForRequest = lmLanguage;
 
     try {
-      const response = await fetch("http://localhost:8000/predict", {
+      const response = await fetch(`${API_BASE_URL}/predict`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildApiHeaders("application/json"),
         body: JSON.stringify({
           text: trimmed,
           model: modelForRequest,
@@ -825,9 +938,9 @@ export default function Home() {
       setBatchDimiTotal(inputRows.length);
       if (runId !== batchDimiRunIdRef.current) return;
 
-      const startResponse = await fetch("http://localhost:8000/lemmatize/batch/start", {
+      const startResponse = await fetch(`${API_BASE_URL}/lemmatize/batch/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildApiHeaders("application/json"),
         body: JSON.stringify({
           texts: inputRows.map((row) => row.text),
           language: batchLanguage,
@@ -846,7 +959,8 @@ export default function Home() {
         if (runId !== batchDimiRunIdRef.current) return true;
 
         const statusResponse = await fetch(
-          `http://localhost:8000/lemmatize/batch/status/${startPayload.job_id}`
+          `${API_BASE_URL}/lemmatize/batch/status/${startPayload.job_id}`,
+          { headers: buildApiHeaders() }
         );
         if (runId !== batchDimiRunIdRef.current) return true;
         if (!statusResponse.ok) {
@@ -861,7 +975,8 @@ export default function Home() {
 
         if (statusPayload.status === "completed") {
           const resultResponse = await fetch(
-            `http://localhost:8000/lemmatize/batch/result/${startPayload.job_id}`
+            `${API_BASE_URL}/lemmatize/batch/result/${startPayload.job_id}`,
+            { headers: buildApiHeaders() }
           );
           if (runId !== batchDimiRunIdRef.current) return true;
           if (!resultResponse.ok) {
@@ -1100,8 +1215,9 @@ export default function Home() {
       formData.append("skip_no_dimi_matches", String(skipNoDimiMatches));
       batchModels.forEach((modelCode) => formData.append("models", modelCode));
 
-      const response = await fetch("http://localhost:8000/batch/start", {
+      const response = await fetch(`${API_BASE_URL}/batch/start`, {
         method: "POST",
+        headers: buildApiHeaders(),
         body: formData,
       });
 
@@ -1114,9 +1230,9 @@ export default function Home() {
       setBatchStatus("processing");
 
       const pollStatus = async () => {
-        const statusResponse = await fetch(
-          `http://localhost:8000/batch/status/${startPayload.job_id}`
-        );
+        const statusResponse = await fetch(`${API_BASE_URL}/batch/status/${startPayload.job_id}`, {
+          headers: buildApiHeaders(),
+        });
         if (!statusResponse.ok) {
           const message = await statusResponse.text();
           throw new Error(message || "Status request failed");
@@ -1129,9 +1245,9 @@ export default function Home() {
         if (statusPayload.metrics) setBatchMetrics(statusPayload.metrics);
 
         if (statusPayload.status === "completed") {
-          const resultResponse = await fetch(
-            `http://localhost:8000/batch/result/${startPayload.job_id}`
-          );
+          const resultResponse = await fetch(`${API_BASE_URL}/batch/result/${startPayload.job_id}`, {
+            headers: buildApiHeaders(),
+          });
           if (!resultResponse.ok) {
             const message = await resultResponse.text();
             throw new Error(message || "Result request failed");
@@ -1977,9 +2093,6 @@ export default function Home() {
                   <p className={styles.previewTitle}>
                     DiMi preview ({(batchOutputFormat ?? "csv").toUpperCase()})
                   </p>
-                  <p className={styles.hint}>
-                    {formatInstanceLabel(dimiProcessedInstanceCount)} processed after DiMi.
-                  </p>
                   {batchOutputFormat === "json" ? (
                     dimiPreviewJson ? (
                       <pre className={styles.previewJson}>
@@ -2111,6 +2224,12 @@ export default function Home() {
                   </div>
 
                   <div className={styles.progressWrap}>
+                    {batchHasInsufficientCredits && (
+                      <p className={styles.warningMessage}>
+                        Not enough credits for this batch. Need {batchEstimatedCredits}, have {billingCreditsRemaining}.
+                      </p>
+                    )}
+
                     <button
                       className={`${styles.primaryButton} ${styles.compactButton}`}
                       type="submit"
@@ -2120,7 +2239,13 @@ export default function Home() {
                         !batchLanguage ||
                         batchStatus === "uploading" ||
                         batchStatus === "processing" ||
-                        !!batchInputLimitError
+                        !!batchInputLimitError ||
+                        batchHasInsufficientCredits
+                      }
+                      title={
+                        batchHasInsufficientCredits
+                          ? `Need ${batchEstimatedCredits} credits but only ${billingCreditsRemaining} are available.`
+                          : undefined
                       }
                     >
                       {batchStatus === "uploading" || batchStatus === "processing"

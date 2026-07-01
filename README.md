@@ -81,6 +81,7 @@ http://localhost:3000
 
 - CPU-only inference.
 - Backend uses CORS for http://localhost:3000.
+- Billing and token posting instructions are in [backend/BILLING.md](backend/BILLING.md).
 
 ## Batch processing
 
