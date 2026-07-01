@@ -2011,33 +2011,6 @@ export default function Home() {
                 </div>
               )}
 
-                          {batchFile && batchOutputFormat && batchLanguage && (
-                            <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
-                              <div className={styles.languageSwitch}>
-                                <span className={styles.label}>Select models...</span>
-                                <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
-                                  {MODEL_OPTIONS.map((option) => (
-                                    <button
-                                      key={option.code}
-                                      className={`${styles.modeTab} ${
-                                        batchModels.includes(option.code) ? styles.modeTabActive : ""
-                                      }`}
-                                      type="button"
-                                      onClick={() => handleBatchModelToggle(option.code)}
-                                      aria-pressed={batchModels.includes(option.code)}
-                                      title={option.name}
-                                    >
-                                      {option.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {batchModels.includes("xlm-roberta") && batchLanguage !== "de" && (
-                                <p className={styles.modelWarning}>{xlmWarning}</p>
-                              )}
-                            </div>
-                          )}
-
               {batchFile && batchOutputFormat && batchLanguage && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
@@ -2212,6 +2185,33 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {batchDimiStatus === "done" && batchDimiPreparedFile && skipNoDimiMatches !== null && (
+                <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
+                  <div className={styles.languageSwitch}>
+                    <span className={styles.label}>Select models...</span>
+                    <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
+                      {MODEL_OPTIONS.map((option) => (
+                        <button
+                          key={option.code}
+                          className={`${styles.modeTab} ${
+                            batchModels.includes(option.code) ? styles.modeTabActive : ""
+                          }`}
+                          type="button"
+                          onClick={() => handleBatchModelToggle(option.code)}
+                          aria-pressed={batchModels.includes(option.code)}
+                          title={option.name}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {batchModels.includes("xlm-roberta") && batchLanguage !== "de" && (
+                    <p className={styles.modelWarning}>{xlmWarning}</p>
+                  )}
                 </div>
               )}
 
