@@ -12,6 +12,15 @@ type PredictionResponse = {
   label: string;
   confidence: number;
   explanation?: string | null;
+  moral_werte?: Array<{
+    text: string;
+    moral_foundations_theory_kategorien: string[];
+  }> | null;
+  protagonists?: Array<{
+    text: string;
+    kategorie: string;
+    rollen: string[];
+  }> | null;
 };
 
 type BatchStatus = "idle" | "uploading" | "processing" | "error" | "done";
@@ -139,6 +148,70 @@ const BATCH_MODEL_COLORS: Record<ModelCode, string> = {
   claude: "#6caac9",
   openai: "#c86a5a",
 };
+
+const PROTAGONIST_CATEGORY_CLASSES: Record<string, string> = {
+  Individuum: styles.protagonistCategoryIndividuum,
+  Menschen: styles.protagonistCategoryMenschen,
+  Institution: styles.protagonistCategoryInstitution,
+  "Soziale Gruppe": styles.protagonistCategorySozialeGruppe,
+  OTHER: styles.protagonistCategoryOther,
+};
+
+const PROTAGONIST_ROLE_CLASSES: Record<string, string> = {
+  "Forderer:in": styles.protagonistRoleForderer,
+  "Adressat:in": styles.protagonistRoleAdressat,
+  "Benefizient:in": styles.protagonistRoleBenefizient,
+  "Malefizient:in": styles.protagonistRoleMalefizient,
+  "Bezug unklar": styles.protagonistRoleUnklar,
+  NONE: styles.protagonistRoleNone,
+};
+
+const PROTAGONIST_CATEGORY_LEGEND = [
+  { label: "Individuum", className: styles.protagonistCategoryIndividuum },
+  { label: "Menschen", className: styles.protagonistCategoryMenschen },
+  { label: "Institution", className: styles.protagonistCategoryInstitution },
+  { label: "Soziale Gruppe", className: styles.protagonistCategorySozialeGruppe },
+  { label: "OTHER", className: styles.protagonistCategoryOther },
+];
+
+const PROTAGONIST_ROLE_LEGEND = [
+  { label: "Forderer:in", className: styles.protagonistRoleForderer },
+  { label: "Adressat:in", className: styles.protagonistRoleAdressat },
+  { label: "Benefizient:in", className: styles.protagonistRoleBenefizient },
+  { label: "Malefizient:in", className: styles.protagonistRoleMalefizient },
+  { label: "Bezug unklar", className: styles.protagonistRoleUnklar },
+  { label: "NONE", className: styles.protagonistRoleNone },
+];
+
+const MORAL_VALUE_CATEGORY_CLASSES: Record<string, string> = {
+  Fürsorge: styles.moralValueCategoryFürsorge,
+  Schaden: styles.moralValueCategorySchaden,
+  Fairness: styles.moralValueCategoryFairness,
+  Betrug: styles.moralValueCategoryBetrug,
+  Loyalität: styles.moralValueCategoryLoyalität,
+  Verrat: styles.moralValueCategoryVerrat,
+  Autorität: styles.moralValueCategoryAutorität,
+  "Untergrabung von Autorität": styles.moralValueCategoryUntergrabung,
+  Reinheit: styles.moralValueCategoryReinheit,
+  Verfall: styles.moralValueCategoryVerfall,
+  Freiheit: styles.moralValueCategoryFreiheit,
+  Unterdrückung: styles.moralValueCategoryUnterdrückung,
+};
+
+const MORAL_VALUE_CATEGORY_LEGEND = [
+  { label: "Fürsorge", className: styles.moralValueCategoryFürsorge },
+  { label: "Schaden", className: styles.moralValueCategorySchaden },
+  { label: "Fairness", className: styles.moralValueCategoryFairness },
+  { label: "Betrug", className: styles.moralValueCategoryBetrug },
+  { label: "Loyalität", className: styles.moralValueCategoryLoyalität },
+  { label: "Verrat", className: styles.moralValueCategoryVerrat },
+  { label: "Autorität", className: styles.moralValueCategoryAutorität },
+  { label: "Untergrabung von Autorität", className: styles.moralValueCategoryUntergrabung },
+  { label: "Reinheit", className: styles.moralValueCategoryReinheit },
+  { label: "Verfall", className: styles.moralValueCategoryVerfall },
+  { label: "Freiheit", className: styles.moralValueCategoryFreiheit },
+  { label: "Unterdrückung", className: styles.moralValueCategoryUnterdrückung },
+];
 
 
 const parseCsvText = (text: string): string[][] => {
@@ -420,6 +493,23 @@ export default function Home() {
     if (!result) return "--";
     return result.explanation?.trim() || "--";
   }, [result]);
+  const showProtagonistsField =
+    result?.label === "moralization" && resultModel === selectedModel && selectedModel !== "xlm-roberta";
+  const protagonistEntries = useMemo(() => {
+    if (!showProtagonistsField) {
+      return [];
+    }
+
+    return result?.protagonists ?? [];
+  }, [result, showProtagonistsField]);
+  const showMoralValuesField = showProtagonistsField;
+  const moralValueEntries = useMemo(() => {
+    if (!showMoralValuesField) {
+      return [];
+    }
+
+    return result?.moral_werte ?? [];
+  }, [result, showMoralValuesField]);
 
   const formatInstanceLabel = (count: number) => `${count} instance${count === 1 ? "" : "s"}`;
   const dimiProcessedInstanceCount = useMemo(() => dimiPreviewRows.length, [dimiPreviewRows]);
@@ -1756,7 +1846,7 @@ export default function Home() {
             {/* ── LM panel ── */}
             <section className={styles.batchPanel}>
               <p className={styles.boxTitle}>
-                Moralization Detection with Language Models
+                Moralization Analysis with Language Models
               </p>
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleSubmit}>
@@ -1868,6 +1958,132 @@ export default function Home() {
                     >
                       {selectedModel === "xlm-roberta" ? confidenceLabel : explanationText}
                     </p>
+                  </div>
+                </section>
+              )}
+
+              {showMoralValuesField && (
+                <section className={`${styles.resultCard} ${styles.protagonistsCard}`}>
+                  <div>
+                    <p className={styles.resultLabel}>Moral values</p>
+                    {/*
+                    <div className={styles.protagonistLegend}>
+                      <div className={styles.protagonistLegendSection}>
+                        <p className={styles.protagonistLegendTitle}>Moral Foundation Theory Categories</p>
+                        <div className={styles.protagonistLegendItems}>
+                          {MORAL_VALUE_CATEGORY_LEGEND.map((item) => (
+                            <span key={item.label} className={item.className}>
+                              {item.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    */}
+                    {moralValueEntries.length > 0 ? (
+                      <div className={styles.protagonistList}>
+                        {moralValueEntries.map((entry, index) => (
+                          <div key={`${entry.text}-${index}`} className={styles.protagonistCard}>
+                            <p className={styles.protagonistText}>{entry.text}</p>
+                            <p className={styles.protagonistMeta}>
+                              <span className={styles.protagonistRoleList}>
+                                {entry.moral_foundations_theory_kategorien.length > 0 ? (
+                                  entry.moral_foundations_theory_kategorien.map((category) => (
+                                    <span
+                                      key={`${entry.text}-${index}-${category}`}
+                                      className={
+                                        MORAL_VALUE_CATEGORY_CLASSES[category] ??
+                                        styles.protagonistCategoryOther
+                                      }
+                                    >
+                                      {category}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className={styles.protagonistCategoryOther}>NONE</span>
+                                )}
+                              </span>
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={styles.protagonistEmpty}>
+                        No moral values returned for this moralization.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {showProtagonistsField && (
+                <section className={`${styles.resultCard} ${styles.protagonistsCard}`}>
+                  <div>
+                    <p className={styles.resultLabel}>Protagonists</p>
+                    {/*
+                    <div className={styles.protagonistLegend}>
+                      <div className={styles.protagonistLegendSection}>
+                        <p className={styles.protagonistLegendTitle}>Categories</p>
+                        <div className={styles.protagonistLegendItems}>
+                          {PROTAGONIST_CATEGORY_LEGEND.map((item) => (
+                            <span key={item.label} className={item.className}>
+                              {item.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className={styles.protagonistLegendSection}>
+                        <p className={styles.protagonistLegendTitle}>Roles</p>
+                        <div className={styles.protagonistLegendItems}>
+                          {PROTAGONIST_ROLE_LEGEND.map((item) => (
+                            <span key={item.label} className={item.className}>
+                              {item.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    */}
+                    {protagonistEntries.length > 0 ? (
+                      <div className={styles.protagonistList}>
+                        {protagonistEntries.map((entry, index) => (
+                          <div key={`${entry.text}-${index}`} className={styles.protagonistCard}>
+                            <p className={styles.protagonistText}>{entry.text}</p>
+                            <p className={styles.protagonistMeta}>
+                              <span
+                                className={
+                                  PROTAGONIST_CATEGORY_CLASSES[entry.kategorie] ??
+                                  styles.protagonistCategoryOther
+                                }
+                              >
+                                {entry.kategorie}
+                              </span>
+                              <span className={styles.protagonistRoleList}>
+                                {entry.rollen.length > 0 ? (
+                                  entry.rollen.map((rolle) => (
+                                    <span
+                                      key={`${entry.text}-${index}-${rolle}`}
+                                      className={
+                                        PROTAGONIST_ROLE_CLASSES[rolle] ??
+                                        styles.protagonistRoleNone
+                                      }
+                                    >
+                                      {rolle}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className={styles.protagonistRoleNone}>NONE</span>
+                                )}
+                              </span>
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={styles.protagonistEmpty}>
+                        No protagonists returned for this moralization.
+                      </p>
+                    )}
                   </div>
                 </section>
               )}

@@ -178,7 +178,7 @@ export default function FloatingKeyPanel() {
         <br /> Contact us via {" "} <a href="mailto:support@moralizer.ai" className={styles.link}> email{" "}
         </a>
         to get one or wait 24h for your coins to refill automatically. 
-        The free tier includes {freeTierCredits} credit(s) per day. 
+        The free tier includes {freeTierCredits} credit(s) per day for all users! 
         Credits are only consumed for external prompting models. 
         Local DiMi and XLM-RoBERTa runs stay free.
         </span>

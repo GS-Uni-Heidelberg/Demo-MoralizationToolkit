@@ -190,6 +190,10 @@
   animation: fadeIn 0.6s ease 0.2s both;
 }
 
+.protagonistsCard {
+  margin-top: -8px;
+}
+
 .resultLabel {
   font-family: var(--font-sans);
   text-transform: uppercase;
@@ -218,6 +222,229 @@
   font-size: 15px;
   line-height: 1.5;
   text-transform: none;
+}
+
+.protagonistList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.protagonistLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.protagonistLegendSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.protagonistLegendTitle {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(249, 244, 236, 0.65);
+}
+
+.protagonistLegendItems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.protagonistCard {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(249, 244, 236, 0.08);
+  border: 1px solid rgba(249, 244, 236, 0.12);
+  width: 100%;
+}
+
+.protagonistText {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  color: #f9f4ec;
+  margin-bottom: 8px;
+}
+
+.protagonistMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.protagonistRoleList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.protagonistMeta > span:not(.protagonistRoleList),
+.protagonistRoleList > span,
+.protagonistLegendItems span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.protagonistCategoryIndividuum {
+  background: rgba(255, 176, 57, 0.28);
+  color: #fff1d4;
+  border-color: rgba(255, 176, 57, 0.45);
+}
+
+.protagonistCategoryMenschen {
+  background: rgba(0, 185, 196, 0.28);
+  color: #d4fbff;
+  border-color: rgba(0, 185, 196, 0.45);
+}
+
+.protagonistCategoryInstitution {
+  background: rgba(66, 138, 255, 0.28);
+  color: #dde9ff;
+  border-color: rgba(66, 138, 255, 0.45);
+}
+
+.protagonistCategorySozialeGruppe {
+  background: rgba(224, 19, 159, 0.28);
+  color: #ffe0e9;
+  border-color: rgba(232, 10, 173, 0.45);
+}
+
+.protagonistCategoryOther {
+  background: rgba(216, 219, 224, 0.24);
+  color: #f5f7fa;
+  border-color: rgba(233, 238, 246, 0.38);
+}
+
+.protagonistRoleForderer {
+  background: rgba(255, 107, 53, 0.28);
+  color: #ffe3d4;
+  border-color: rgba(255, 107, 53, 0.45);
+}
+
+.protagonistRoleAdressat {
+  background: rgba(132, 69, 255, 0.28);
+  color: #ece2ff;
+  border-color: rgba(132, 69, 255, 0.45);
+}
+
+.protagonistRoleBenefizient {
+  background: rgba(24, 183, 94, 0.28);
+  color: #dbffe8;
+  border-color: rgba(24, 183, 94, 0.45);
+}
+
+.protagonistRoleMalefizient {
+  background: rgba(227, 52, 70, 0.28);
+  color: #ffe0e4;
+  border-color: rgba(227, 52, 70, 0.45);
+}
+
+.protagonistRoleUnklar {
+  background: rgba(255, 168, 0, 0.28);
+  color: #fff0cf;
+  border-color: rgba(255, 168, 0, 0.45);
+}
+
+.protagonistRoleNone {
+  background: rgba(216, 219, 224, 0.24);
+  color: #f5f7fa;
+  border-color: rgba(233, 238, 246, 0.38);
+}
+
+.moralValueCategoryFürsorge {
+  background: rgba(18, 159, 136, 0.28);
+  color: #d8fff7;
+  border-color: rgba(18, 159, 136, 0.45);
+}
+
+.moralValueCategorySchaden {
+  background: rgba(224, 62, 62, 0.28);
+  color: #ffe2e2;
+  border-color: rgba(224, 62, 62, 0.45);
+}
+
+.moralValueCategoryFairness {
+  background: rgba(79, 143, 255, 0.28);
+  color: #dce8ff;
+  border-color: rgba(79, 143, 255, 0.45);
+}
+
+.moralValueCategoryBetrug {
+  background: rgba(225, 126, 43, 0.28);
+  color: #ffe8d5;
+  border-color: rgba(225, 126, 43, 0.45);
+}
+
+.moralValueCategoryLoyalität {
+  background: rgba(114, 84, 255, 0.28);
+  color: #e8e0ff;
+  border-color: rgba(114, 84, 255, 0.45);
+}
+
+.moralValueCategoryVerrat {
+  background: rgba(165, 38, 122, 0.28);
+  color: #ffd8f0;
+  border-color: rgba(165, 38, 122, 0.45);
+}
+
+.moralValueCategoryAutorität {
+  background: rgba(85, 126, 48, 0.28);
+  color: #e7f7d9;
+  border-color: rgba(85, 126, 48, 0.45);
+}
+
+.moralValueCategoryUntergrabung {
+  background: rgba(194, 78, 28, 0.28);
+  color: #ffe5d7;
+  border-color: rgba(194, 78, 28, 0.45);
+}
+
+.moralValueCategoryReinheit {
+  background: rgba(199, 170, 61, 0.28);
+  color: #fff4d4;
+  border-color: rgba(199, 170, 61, 0.45);
+}
+
+.moralValueCategoryVerfall {
+  background: rgba(107, 102, 79, 0.28);
+  color: #f5f0dc;
+  border-color: rgba(107, 102, 79, 0.45);
+}
+
+.moralValueCategoryFreiheit {
+  background: rgba(31, 160, 189, 0.28);
+  color: #dcfbff;
+  border-color: rgba(31, 160, 189, 0.45);
+}
+
+.moralValueCategoryUnterdrückung {
+  background: rgba(76, 76, 86, 0.28);
+  color: #f0f2f5;
+  border-color: rgba(76, 76, 86, 0.45);
+}
+
+.protagonistEmpty {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(249, 244, 236, 0.78);
 }
 
 .metricsChartCard {
