@@ -20,10 +20,10 @@ MAX_INPUT_TEXT_LENGTH_ENV = os.environ.get("MAX_INPUT_TEXT_LENGTH")
 EXTERNAL_REQUEST_CREDIT_COST_ENV = os.environ.get("EXTERNAL_REQUEST_CREDIT_COST")
 LOCAL_REQUEST_CREDIT_COST_ENV = os.environ.get("LOCAL_REQUEST_CREDIT_COST")
 
-DEFAULT_FREE_TIER_DAILY_CREDITS = int(FREE_TIER_DAILY_CREDITS_ENV or "100")
+DEFAULT_FREE_TIER_DAILY_CREDITS = int(FREE_TIER_DAILY_CREDITS_ENV or "20")
 DEFAULT_MAX_BATCH_INSTANCES = int(MAX_BATCH_INSTANCES_ENV or "200000")
 DEFAULT_MAX_INPUT_TEXT_LENGTH = int(MAX_INPUT_TEXT_LENGTH_ENV or "5000")
-DEFAULT_EXTERNAL_REQUEST_CREDIT_COST = int(EXTERNAL_REQUEST_CREDIT_COST_ENV or "5")
+DEFAULT_EXTERNAL_REQUEST_CREDIT_COST = int(EXTERNAL_REQUEST_CREDIT_COST_ENV or "1")
 DEFAULT_LOCAL_REQUEST_CREDIT_COST = int(LOCAL_REQUEST_CREDIT_COST_ENV or "1")
 
 DB_LOCK = threading.Lock()
@@ -686,7 +686,9 @@ def charge_batch_credits(
 
 
 def provider_credit_cost(provider: str, settings: BillingSettings) -> int:
-    return settings.local_request_credit_cost if provider == "xlm-roberta" else settings.external_request_credit_cost
+    if provider == "xlm-roberta":
+        return 0
+    return settings.external_request_credit_cost
 
 
 def summarize_batch_credit_need(

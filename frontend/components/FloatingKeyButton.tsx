@@ -16,7 +16,7 @@ type BillingStatusResponse = {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const TOKEN_STORAGE_KEY = "apiToken";
 const LEGACY_TOKEN_STORAGE_KEY = "apiKey";
-const DEFAULT_FREE_TIER_CREDITS = 100;
+const DEFAULT_FREE_TIER_CREDITS = 20;
 
 function getStoredToken(): string {
   if (typeof window === "undefined") return "";
@@ -193,8 +193,8 @@ export default function FloatingKeyPanel() {
         <br /> Contact us via {" "} <a href="mailto:maria.becker@gs.uni-heidelberg.de" className={styles.link}> email{" "}
         </a>
         to get one or wait 24h for your coins to refill automatically. 
-        The free tier includes {freeTierCredits} credit(s) per day for all users.
-        XLM-RoBERTa uses 1 credit per prediction. Claude Haiku 4.5 and OpenAI GPT-5-mini use 5 credits per prediction.
+        The free tier includes {freeTierCredits} credit(s) per day for external models.
+        XLM-RoBERTa predictions are free. Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
         Local DiMi runs stay free.
         </span>
 

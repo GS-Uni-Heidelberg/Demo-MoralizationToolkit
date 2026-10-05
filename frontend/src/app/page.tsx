@@ -352,8 +352,7 @@ export default function Home() {
   );
   const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
   const [billingCreditsRemaining, setBillingCreditsRemaining] = useState<number | null>(null);
-  const [billingExternalRequestCreditCost, setBillingExternalRequestCreditCost] = useState(5);
-  const [billingLocalRequestCreditCost, setBillingLocalRequestCreditCost] = useState(1);
+  const [billingExternalRequestCreditCost, setBillingExternalRequestCreditCost] = useState(1);
   const [billingStatusLoaded, setBillingStatusLoaded] = useState(false);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const batchDimiRunIdRef = useRef(0);
@@ -521,7 +520,7 @@ export default function Home() {
       (total, modelCode) =>
         total +
         (modelCode === "xlm-roberta"
-          ? billingLocalRequestCreditCost
+          ? 0
           : billingExternalRequestCreditCost),
       0
     );
@@ -530,7 +529,6 @@ export default function Home() {
     lmDetectionInstanceCount,
     batchModels,
     billingExternalRequestCreditCost,
-    billingLocalRequestCreditCost,
   ]);
   const batchHasInsufficientCredits =
     billingStatusLoaded &&
@@ -627,9 +625,6 @@ export default function Home() {
           const settings = (await settingsResponse.json()) as BillingSettingsResponse;
           if (typeof settings.external_request_credit_cost === "number") {
             setBillingExternalRequestCreditCost(settings.external_request_credit_cost);
-          }
-          if (typeof settings.local_request_credit_cost === "number") {
-            setBillingLocalRequestCreditCost(settings.local_request_credit_cost);
           }
         }
 
@@ -1859,7 +1854,7 @@ export default function Home() {
                 <br/>
                 The LLMs provide a short explanation plus extracted protagonists and moral values, while &quot;XLM-RoBERTa&quot; returns only a prediction confidence because it is a classification model.
                 &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot; are general-purpose models for multiple languages, while &quot;XLM-RoBERTa&quot; was fine-tuned on the Multilingual Moralization Corpus (pending publication) and supports all available languages.
-                Each user receives 100 free credits per day. XLM-RoBERTa uses 1 credit per prediction, while Claude Haiku 4.5 and OpenAI GPT-5-mini use 5 credits per prediction.
+                Each user receives 20 free credits per day for external model predictions. XLM-RoBERTa is free, while Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
                 <br/>
                 Language models can and will make mistakes so please use results with caution!
               </p>
@@ -2434,9 +2429,9 @@ export default function Home() {
                   <div className={styles.languageSwitch}>
                     <span className={styles.label}>Select models...</span>
                     <p className={styles.boxDescription}>
-                      XLM-RoBERTa supports all available languages and uses 1 credit per prediction. It provides a confidence score for the moralization prediction.
+                      XLM-RoBERTa supports all available languages and is free to use. It provides a confidence score for the moralization prediction.
                       <br/>
-                      Claude Haiku 4.5 and OpenAI GPT-5-mini support multiple languages and use 5 credits per prediction. In addition to the prediction, these models provide an explanation for their prediction as well as additional information about moral values and protagonists.
+                      Claude Haiku 4.5 and OpenAI GPT-5-mini support multiple languages and use 1 credit per prediction. In addition to the prediction, these models provide an explanation for their prediction as well as additional information about moral values and protagonists.
 
                     </p>
                     <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
