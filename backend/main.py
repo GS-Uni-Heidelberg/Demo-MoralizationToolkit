@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import csv
+import html
+import hmac
 import importlib
 import io
 import json
+import logging
 import os
 import re
+import secrets
 import time
 import threading
 import uuid
@@ -51,6 +55,7 @@ from billing_db import (  # noqa: E402
     initialize_database,
     list_api_tokens,
     list_billing_settings,
+    provider_credit_cost,
     summarize_batch_credit_need,
 )
 
@@ -76,8 +81,17 @@ MODEL_COLUMN_SUFFIXES = {
 }
 
 LEMMAS_DIR = Path(os.environ.get("LEMMAS_DIR", ROOT_DIR / "models" / "dimi"))
+ENABLED_LEMMA_LANGUAGES = tuple(
+    language.strip().lower()
+    for language in os.environ.get("ENABLED_LANGUAGES", "de,en,fr").split(",")
+    if language.strip()
+)
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", "50000000"))
+RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "120"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
 
 app = FastAPI(title="Moralization Detection API")
+LOGGER = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,6 +110,42 @@ app.add_middleware(
         "X-Metrics-FN",
     ],
 )
+
+RATE_LIMIT_PATHS = {
+    "/predict",
+    "/batch/start",
+    "/lemmatize",
+    "/lemmatize/batch",
+    "/lemmatize/batch/start",
+}
+RATE_LIMIT_STATE: dict[str, tuple[float, int]] = {}
+RATE_LIMIT_LOCK = threading.Lock()
+
+
+@app.middleware("http")
+async def rate_limit_requests(request, call_next):
+    if request.method == "POST" and request.url.path in RATE_LIMIT_PATHS:
+        client_host = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        key = f"{client_host}:{request.url.path}"
+        with RATE_LIMIT_LOCK:
+            window_start, request_count = RATE_LIMIT_STATE.get(key, (now, 0))
+            if now - window_start >= RATE_LIMIT_WINDOW_SECONDS:
+                window_start, request_count = now, 0
+            request_count += 1
+            RATE_LIMIT_STATE[key] = (window_start, request_count)
+            if request_count > RATE_LIMIT_REQUESTS:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too many requests. Please try again later."},
+                    headers={
+                        "Retry-After": str(
+                            max(1, int(RATE_LIMIT_WINDOW_SECONDS - (now - window_start)))
+                        )
+                    },
+                )
+
+    return await call_next(request)
 
 
 initialize_database()
@@ -221,6 +271,7 @@ class BatchJob:
         billing_credits_used: int,
     ) -> None:
         self.job_id = job_id
+        self.access_token = secrets.token_urlsafe(32)
         self.output_format = output_format
         self.models = models
         self.texts = texts
@@ -250,6 +301,7 @@ class LemmaBatchJob:
         language: str,
     ) -> None:
         self.job_id = job_id
+        self.access_token = secrets.token_urlsafe(32)
         self.texts = texts
         self.language = language
         self.total = len(texts)
@@ -665,7 +717,7 @@ def load_lemmas(language: str) -> list[str]:
 
 def _preload_lemmas() -> dict[str, list[str]]:
     cache: dict[str, list[str]] = {}
-    for lang in ("de", "en", "fr", "it"):
+    for lang in ENABLED_LEMMA_LANGUAGES:
         try:
             cache[lang] = load_lemmas(lang)
         except FileNotFoundError as exc:
@@ -716,13 +768,13 @@ class LemmatizerBundle:
             stanza.download(
                 language,
                 package="default",
-                processors="tokenize,pos,lemma",
+                processors="tokenize,mwt,pos,lemma",
                 logging_level="WARN",
             )
             return stanza.Pipeline(
                 language,
                 package="default",
-                processors="tokenize,pos,lemma",
+                processors="tokenize,mwt,pos,lemma",
                 logging_level="WARN",
             )
 
@@ -736,14 +788,21 @@ class LemmatizerBundle:
     def _mark_tokens(sentence_text: str, surface_forms: set[str]) -> str:
         """Wrap matched surface forms in <mark> tags (case-insensitive)."""
         if not surface_forms:
-            return sentence_text
+            return html.escape(sentence_text, quote=False)
+        escaped_text = html.escape(sentence_text, quote=False)
+        escaped_surface_forms = {
+            html.escape(surface_form, quote=False) for surface_form in surface_forms
+        }
         pattern = re.compile(
             r"\b("
-            + "|".join(re.escape(f) for f in sorted(surface_forms, key=len, reverse=True))
+            + "|".join(
+                re.escape(surface_form)
+                for surface_form in sorted(escaped_surface_forms, key=len, reverse=True)
+            )
             + r")\b",
             flags=re.IGNORECASE,
         )
-        return pattern.sub(r"<mark>\1</mark>", sentence_text)
+        return pattern.sub(r"<mark>\1</mark>", escaped_text)
 
     def _find_lemmas_with_pipeline(
         self,
@@ -935,6 +994,16 @@ def raise_billing_http_error(exc: BillingError) -> None:
     ):
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def require_admin_key(admin_key: str | None) -> None:
+    if not ADMIN_API_KEY or not hmac.compare_digest(admin_key or "", ADMIN_API_KEY):
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+
+
+def require_job_access(expected_token: str, provided_token: str | None) -> None:
+    if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+        raise HTTPException(status_code=403, detail="Invalid job token")
 
 
 def validate_text_length(text: str, max_length: int) -> None:
@@ -1297,17 +1366,6 @@ def run_batch_job(job: BatchJob) -> None:
                 )
         job.metrics = metrics_by_model or None
 
-    if job.billing_credits_used > 0:
-        try:
-            charge_batch_credits(
-                api_token=job.api_token,
-                providers=[model_code for model_code in job.models if is_billable_model(model_code)],
-                credits_used=job.billing_credits_used,
-                request_kind="batch",
-            )
-        except BillingError as exc:
-            job.billing_error = str(exc)
-
     if job.output_format == "json":
         job.result_json = {"results": results}
     else:
@@ -1404,7 +1462,8 @@ else:
 @app.get("/health")
 async def health() -> dict[str, str]:
     if MODEL_ERROR:
-        return {"status": "error", "detail": str(MODEL_ERROR)}
+        LOGGER.error("Model failed to load", exc_info=MODEL_ERROR)
+        return {"status": "error", "detail": "Model unavailable"}
     return {"status": "ok"}
 
 
@@ -1425,8 +1484,7 @@ async def create_token(
     request: ApiTokenCreateRequest,
     admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
 ) -> ApiTokenCreateResponse:
-    if ADMIN_API_KEY and admin_key != ADMIN_API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid admin key")
+    require_admin_key(admin_key)
 
     try:
         record = create_api_token(
@@ -1459,8 +1517,7 @@ async def create_token(
 async def list_tokens(
     admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
 ) -> list[ApiTokenOverviewResponse]:
-    if ADMIN_API_KEY and admin_key != ADMIN_API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid admin key")
+    require_admin_key(admin_key)
 
     return [
         ApiTokenOverviewResponse(
@@ -1492,16 +1549,16 @@ async def predict(
         selected_model = request.model.strip().lower()
         _max_batch_instances, max_input_text_length = get_effective_request_limits(api_token)
         validate_text_length(request.text, max_input_text_length)
-        if is_billable_model(selected_model):
-            try:
-                charge_credits(
-                    api_token=api_token,
-                    provider=selected_model,
-                    credits_used=get_billing_settings().external_request_credit_cost,
-                    request_kind="predict",
-                )
-            except BillingError as exc:
-                raise_billing_http_error(exc)
+        try:
+            billing_settings = get_billing_settings()
+            charge_credits(
+                api_token=api_token,
+                provider=selected_model,
+                credits_used=provider_credit_cost(selected_model, billing_settings),
+                request_kind="predict",
+            )
+        except BillingError as exc:
+            raise_billing_http_error(exc)
         prediction = run_model_prediction(request.text, selected_model)
         return PredictResponse(
             label=prediction.label,
@@ -1513,7 +1570,8 @@ async def predict(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        LOGGER.exception("Prediction failed")
+        raise HTTPException(status_code=500, detail="Prediction failed") from exc
 
 
 @app.post("/batch/start")
@@ -1527,9 +1585,14 @@ async def batch_start(
     if MODEL_ERROR or MODEL is None:
         raise HTTPException(status_code=500, detail="Model failed to load")
 
-    raw_bytes = await file.read()
+    raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Empty file")
+    if len(raw_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload is too large. Maximum allowed is {MAX_UPLOAD_BYTES} bytes.",
+        )
 
     filename = (file.filename or "").lower()
     content_type = (file.content_type or "").lower()
@@ -1585,6 +1648,16 @@ async def batch_start(
         settings=billing_settings,
     )
 
+    try:
+        charge_batch_credits(
+            api_token=api_token,
+            providers=selected_models,
+            credits_used=total_credits,
+            request_kind="batch",
+        )
+    except BillingError as exc:
+        raise_billing_http_error(exc)
+
     job_id = str(uuid.uuid4())
     job = BatchJob(
         job_id=job_id,
@@ -1606,15 +1679,19 @@ async def batch_start(
     thread = threading.Thread(target=run_batch_job, args=(job,), daemon=True)
     thread.start()
 
-    return {"job_id": job_id}
+    return {"job_id": job_id, "access_token": job.access_token}
 
 
 @app.get("/batch/status/{job_id}")
-async def batch_status(job_id: str) -> dict[str, object]:
+async def batch_status(
+    job_id: str,
+    job_token: str | None = Header(default=None, alias="X-Job-Token"),
+) -> dict[str, object]:
     with JOB_LOCK:
         job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    require_job_access(job.access_token, job_token)
 
     progress = int((job.processed / job.total) * 100) if job.total else 0
     payload: dict[str, object] = {
@@ -1633,11 +1710,15 @@ async def batch_status(job_id: str) -> dict[str, object]:
 
 
 @app.get("/batch/result/{job_id}")
-async def batch_result(job_id: str) -> Response:
+async def batch_result(
+    job_id: str,
+    job_token: str | None = Header(default=None, alias="X-Job-Token"),
+) -> Response:
     with JOB_LOCK:
         job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    require_job_access(job.access_token, job_token)
     if job.status != "completed":
         raise HTTPException(status_code=409, detail="Job not completed")
     if job.output_format == "json":
@@ -1691,7 +1772,8 @@ async def lemmatize(request: LemmatizerRequest) -> LemmatizerResponse:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        LOGGER.exception("Lemmatization failed")
+        raise HTTPException(status_code=500, detail="Lemmatization failed") from exc
 
 
 @app.post("/lemmatize/batch")
@@ -1702,6 +1784,12 @@ async def lemmatize_batch(request: LemmaBatchRequest) -> list[dict]:
     """
     if LEMMATIZER_ERROR or LEMMATIZER is None:
         raise HTTPException(status_code=500, detail="Lemmatizer failed to load")
+
+    max_batch_instances, max_input_text_length = get_effective_request_limits(None)
+    if len(request.texts) > max_batch_instances:
+        raise HTTPException(status_code=400, detail="Too many texts in lemma batch.")
+    for text in request.texts:
+        validate_text_length(text, max_input_text_length)
 
     try:
         return [
@@ -1714,13 +1802,20 @@ async def lemmatize_batch(request: LemmaBatchRequest) -> list[dict]:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        LOGGER.exception("Lemma batch failed")
+        raise HTTPException(status_code=500, detail="Lemma batch failed") from exc
 
 
 @app.post("/lemmatize/batch/start")
 async def lemmatize_batch_start(request: LemmaBatchRequest) -> dict[str, str]:
     if LEMMATIZER_ERROR or LEMMATIZER is None:
         raise HTTPException(status_code=500, detail="Lemmatizer failed to load")
+
+    max_batch_instances, max_input_text_length = get_effective_request_limits(None)
+    if len(request.texts) > max_batch_instances:
+        raise HTTPException(status_code=400, detail="Too many texts in lemma batch.")
+    for text in request.texts:
+        validate_text_length(text, max_input_text_length)
 
     job_id = str(uuid.uuid4())
     job = LemmaBatchJob(
@@ -1734,15 +1829,19 @@ async def lemmatize_batch_start(request: LemmaBatchRequest) -> dict[str, str]:
     thread = threading.Thread(target=run_lemma_batch_job, args=(job,), daemon=True)
     thread.start()
 
-    return {"job_id": job_id}
+    return {"job_id": job_id, "access_token": job.access_token}
 
 
 @app.get("/lemmatize/batch/status/{job_id}")
-async def lemmatize_batch_status(job_id: str) -> dict[str, object]:
+async def lemmatize_batch_status(
+    job_id: str,
+    job_token: str | None = Header(default=None, alias="X-Job-Token"),
+) -> dict[str, object]:
     with LEMMA_JOB_LOCK:
         job = LEMMA_JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    require_job_access(job.access_token, job_token)
 
     progress = int((job.processed / job.total) * 100) if job.total else 0
     payload: dict[str, object] = {
@@ -1759,11 +1858,15 @@ async def lemmatize_batch_status(job_id: str) -> dict[str, object]:
 
 
 @app.get("/lemmatize/batch/result/{job_id}")
-async def lemmatize_batch_result(job_id: str) -> JSONResponse:
+async def lemmatize_batch_result(
+    job_id: str,
+    job_token: str | None = Header(default=None, alias="X-Job-Token"),
+) -> JSONResponse:
     with LEMMA_JOB_LOCK:
         job = LEMMA_JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    require_job_access(job.access_token, job_token)
     if job.status != "completed":
         raise HTTPException(status_code=409, detail="Job not completed")
     if job.result_json is None:

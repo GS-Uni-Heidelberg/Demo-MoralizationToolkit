@@ -5,7 +5,14 @@ Quick start for the minimal frontend + backend demo.
 ## Requirements
 
 - Python 3.10+
-- Node.js 20+
+- Node.js 22.23.2 (or newer)
+
+If `npm run dev` reports an unsupported Node.js version, use the pinned version from `.nvmrc`:
+
+```bash
+nvm install
+nvm use
+```
 
 ## Backend (FastAPI)
 
@@ -65,17 +72,36 @@ http://127.0.0.1:8000/health
 
 ## Frontend (Next.js)
 
+From the repository root:
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
+If your terminal is already in `frontend`, omit `cd frontend` and run only
+`npm install` followed by `npm run dev`.
+
+If you still see the Node.js version error, confirm the active version with `node --version` and switch to Node 22.23.2 or newer.
+
 Open:
 
 ```
 http://localhost:3000
 ```
+
+For a deployed frontend, set `NEXT_PUBLIC_API_BASE_URL` to the HTTPS origin of the
+backend before building. The local fallback is `http://localhost:8000`.
+
+The backend also supports these safety settings in its environment file:
+
+- `MAX_UPLOAD_BYTES` (default `50000000`)
+- `RATE_LIMIT_REQUESTS` (default `120` per client and endpoint)
+- `RATE_LIMIT_WINDOW_SECONDS` (default `60`)
+
+The in-process rate limit is a baseline for a single worker. Use a reverse proxy
+or shared rate-limit store for multi-worker or multi-instance deployments.
 
 ## Notes
 

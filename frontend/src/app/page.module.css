@@ -1010,6 +1010,35 @@
   color: var(--ink-700);
 }
 
+.boxDescription {
+  margin: 8px 0 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-600);
+}
+
+.citationLink {
+  color: #1b4d6a;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.18em;
+  font-weight: 600;
+  transition: color 0.2s ease, text-decoration-color 0.2s ease, background-color 0.2s ease;
+}
+
+.citationLink:hover {
+  color: #0f3a52;
+  text-decoration-color: #0f3a52;
+  background: rgba(27, 77, 106, 0.08);
+}
+
+.citationLink:focus-visible {
+  outline: 2px solid rgba(108, 170, 201, 0.65);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .formatList {
   display: grid;
   gap: 6px;

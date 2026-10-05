@@ -83,9 +83,10 @@ The token-specific `max_batch_instances` and `max_input_text_length` are enforce
 
 ## What costs credits
 
-- `openai` and `claude` predictions cost credits.
-- `xlm-roberta` and DiMi/local lemmatization do not cost credits.
-- Anonymous requests use the free tier defined in the backend settings.
+- `openai` and `claude` predictions cost 5 credits each.
+- `xlm-roberta` predictions cost 1 credit each.
+- DiMi/local lemmatization does not cost credits.
+- Anonymous requests receive 100 free credits per UTC day.
 
 ## Configuration
 
@@ -96,6 +97,7 @@ Relevant environment variables:
 - `MAX_BATCH_INSTANCES`
 - `MAX_INPUT_TEXT_LENGTH`
 - `EXTERNAL_REQUEST_CREDIT_COST`
+- `LOCAL_REQUEST_CREDIT_COST`
 - `ADMIN_API_KEY`
 
 ## Notes

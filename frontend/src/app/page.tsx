@@ -29,6 +29,7 @@ type ViewMode = "single" | "batch";
 type BillingSettingsResponse = {
   free_tier_daily_credits: number;
   external_request_credit_cost: number;
+  local_request_credit_cost: number;
 };
 
 type BillingStatusResponse = {
@@ -89,11 +90,11 @@ const MAX_PREVIEW_ROWS = 5;
 const MAX_PREVIEW_COLS = 5;
 const MAX_TEXT_LENGTH = 5000;
 const MAX_BATCH_INSTANCES = 200000;
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const TOKEN_STORAGE_KEY = "apiToken";
 const LEGACY_TOKEN_STORAGE_KEY = "apiKey";
 
-function buildApiHeaders(contentType?: string): HeadersInit {
+function buildApiHeaders(contentType?: string, jobToken?: string): HeadersInit {
   const headers: Record<string, string> = {};
   if (contentType) {
     headers["Content-Type"] = contentType;
@@ -101,11 +102,15 @@ function buildApiHeaders(contentType?: string): HeadersInit {
 
   if (typeof window !== "undefined") {
     const token =
-      localStorage.getItem(TOKEN_STORAGE_KEY) ?? localStorage.getItem(LEGACY_TOKEN_STORAGE_KEY);
+      sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? sessionStorage.getItem(LEGACY_TOKEN_STORAGE_KEY);
     const trimmedToken = token?.trim();
     if (trimmedToken) {
       headers["X-API-Token"] = trimmedToken;
     }
+  }
+
+  if (jobToken) {
+    headers["X-Job-Token"] = jobToken;
   }
 
   return headers;
@@ -116,7 +121,9 @@ const DEFAULT_TEXT =
 
 const INITIAL_TEXT = DEFAULT_TEXT;
 
-const LANGUAGE_OPTIONS: Array<{
+const ENABLED_LANGUAGE_CODES: LanguageCode[] = ["de", "en", "fr"];
+
+const ALL_LANGUAGE_OPTIONS: Array<{
   code: LanguageCode;
   label: string;
   name: string;
@@ -126,6 +133,10 @@ const LANGUAGE_OPTIONS: Array<{
   { code: "fr", label: "FR", name: "Français" },
   { code: "it", label: "IT", name: "Italiano" },
 ];
+
+const LANGUAGE_OPTIONS = ALL_LANGUAGE_OPTIONS.filter((option) =>
+  ENABLED_LANGUAGE_CODES.includes(option.code)
+);
 
 const MODEL_OPTIONS: Array<{
   code: ModelCode;
@@ -166,23 +177,6 @@ const PROTAGONIST_ROLE_CLASSES: Record<string, string> = {
   NONE: styles.protagonistRoleNone,
 };
 
-const PROTAGONIST_CATEGORY_LEGEND = [
-  { label: "Individuum", className: styles.protagonistCategoryIndividuum },
-  { label: "Menschen", className: styles.protagonistCategoryMenschen },
-  { label: "Institution", className: styles.protagonistCategoryInstitution },
-  { label: "Soziale Gruppe", className: styles.protagonistCategorySozialeGruppe },
-  { label: "OTHER", className: styles.protagonistCategoryOther },
-];
-
-const PROTAGONIST_ROLE_LEGEND = [
-  { label: "Forderer:in", className: styles.protagonistRoleForderer },
-  { label: "Adressat:in", className: styles.protagonistRoleAdressat },
-  { label: "Benefizient:in", className: styles.protagonistRoleBenefizient },
-  { label: "Malefizient:in", className: styles.protagonistRoleMalefizient },
-  { label: "Bezug unklar", className: styles.protagonistRoleUnklar },
-  { label: "NONE", className: styles.protagonistRoleNone },
-];
-
 const MORAL_VALUE_CATEGORY_CLASSES: Record<string, string> = {
   Fürsorge: styles.moralValueCategoryFürsorge,
   Schaden: styles.moralValueCategorySchaden,
@@ -197,22 +191,6 @@ const MORAL_VALUE_CATEGORY_CLASSES: Record<string, string> = {
   Freiheit: styles.moralValueCategoryFreiheit,
   Unterdrückung: styles.moralValueCategoryUnterdrückung,
 };
-
-const MORAL_VALUE_CATEGORY_LEGEND = [
-  { label: "Fürsorge", className: styles.moralValueCategoryFürsorge },
-  { label: "Schaden", className: styles.moralValueCategorySchaden },
-  { label: "Fairness", className: styles.moralValueCategoryFairness },
-  { label: "Betrug", className: styles.moralValueCategoryBetrug },
-  { label: "Loyalität", className: styles.moralValueCategoryLoyalität },
-  { label: "Verrat", className: styles.moralValueCategoryVerrat },
-  { label: "Autorität", className: styles.moralValueCategoryAutorität },
-  { label: "Untergrabung von Autorität", className: styles.moralValueCategoryUntergrabung },
-  { label: "Reinheit", className: styles.moralValueCategoryReinheit },
-  { label: "Verfall", className: styles.moralValueCategoryVerfall },
-  { label: "Freiheit", className: styles.moralValueCategoryFreiheit },
-  { label: "Unterdrückung", className: styles.moralValueCategoryUnterdrückung },
-];
-
 
 const parseCsvText = (text: string): string[][] => {
   const rows: string[][] = [];
@@ -270,6 +248,37 @@ const formatJsonPreview = (text: string): string => {
   return JSON.stringify(parsed, null, 2);
 };
 
+const formatDuration = (seconds: number): string => {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${remainingSeconds}s`;
+  }
+
+  if (minutes === 0) {
+    return `${remainingSeconds}s`;
+  }
+
+  return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+};
+
+const estimateRemainingTime = (
+  startedAt: number | null,
+  progress: number,
+  currentTime: number | null,
+): string | null => {
+  if (!startedAt || !currentTime || progress <= 0 || progress >= 100) return null;
+
+  const elapsedSeconds = (currentTime - startedAt) / 1000;
+  const estimatedTotalSeconds = (elapsedSeconds * 100) / progress;
+  return formatDuration(estimatedTotalSeconds - elapsedSeconds);
+};
+
+const getCurrentTime = (): number => Date.now();
+
 export default function Home() {
   const currentYear = new Date().getFullYear();
   const [dimiText, setDimiText] = useState(DEFAULT_TEXT);
@@ -282,8 +291,7 @@ export default function Home() {
 
   // Fetch lemma count whenever the selected language changes
   useEffect(() => {
-    setLemmaCount(null);
-    fetch(`http://localhost:8000/lemmas/${dimiLanguage}`)
+    fetch(`${API_BASE_URL}/lemmas/${dimiLanguage}`)
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
         return res.json() as Promise<{ language: string; lemmas: string[] }>;
@@ -344,9 +352,10 @@ export default function Home() {
   );
   const [batchInputLimitError, setBatchInputLimitError] = useState<string | null>(null);
   const [billingCreditsRemaining, setBillingCreditsRemaining] = useState<number | null>(null);
-  const [billingExternalRequestCreditCost, setBillingExternalRequestCreditCost] = useState(1);
+  const [billingExternalRequestCreditCost, setBillingExternalRequestCreditCost] = useState(5);
+  const [billingLocalRequestCreditCost, setBillingLocalRequestCreditCost] = useState(1);
   const [billingStatusLoaded, setBillingStatusLoaded] = useState(false);
-  const [clockTick, setClockTick] = useState<number>(0);
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
   const batchDimiRunIdRef = useRef(0);
 
   const clearBatchRunState = () => {
@@ -387,31 +396,6 @@ export default function Home() {
   const confirmBatchReset = (message: string) => {
     if (typeof window === "undefined") return true;
     return window.confirm(message);
-  };
-
-  const formatDuration = (seconds: number) => {
-    const safeSeconds = Math.max(0, Math.round(seconds));
-    const hours = Math.floor(safeSeconds / 3600);
-    const minutes = Math.floor((safeSeconds % 3600) / 60);
-    const remainingSeconds = safeSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${remainingSeconds}s`;
-    }
-
-    if (minutes === 0) {
-      return `${remainingSeconds}s`;
-    }
-
-    return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
-  };
-
-  const estimateRemainingTime = (startedAt: number | null, progress: number) => {
-    if (!startedAt || progress <= 0 || progress >= 100) return null;
-
-    const elapsedSeconds = (Date.now() - startedAt) / 1000;
-    const estimatedTotalSeconds = (elapsedSeconds * 100) / progress;
-    return formatDuration(estimatedTotalSeconds - elapsedSeconds);
   };
 
   const hasPreparedDimiState = () => {
@@ -481,10 +465,6 @@ export default function Home() {
   const isDisabled = status === "loading" || text.trim().length === 0;
   const isTextTooLong = text.length > MAX_TEXT_LENGTH;
   const isSingleAnalyzeDisabled = isDisabled || isTextTooLong;
-  const selectedModelLabel = useMemo(() => {
-    return MODEL_OPTIONS.find((option) => option.code === selectedModel)?.label ?? "XLM-RoBERTa";
-  }, [selectedModel]);
-  const xlmWarning = "Model only fine-tuned on German texts. Not tested on other languages!";
   const confidenceLabel = useMemo(() => {
     if (!result) return "--";
     return `${(result.confidence * 100).toFixed(2)}%`;
@@ -532,32 +512,37 @@ export default function Home() {
     dimiProcessedInstanceCount,
     dimiSkippedInstanceCount,
   ]);
-  const batchBillableModelCount = useMemo(
-    () => batchModels.filter((modelCode) => modelCode !== "xlm-roberta").length,
-    [batchModels]
-  );
   const batchEstimatedCredits = useMemo(() => {
-    if (lmDetectionInstanceCount === 0 || batchBillableModelCount === 0) {
+    if (lmDetectionInstanceCount === 0 || batchModels.length === 0) {
       return 0;
     }
 
-    return lmDetectionInstanceCount * batchBillableModelCount * billingExternalRequestCreditCost;
+    const perInstanceCost = batchModels.reduce(
+      (total, modelCode) =>
+        total +
+        (modelCode === "xlm-roberta"
+          ? billingLocalRequestCreditCost
+          : billingExternalRequestCreditCost),
+      0
+    );
+    return lmDetectionInstanceCount * perInstanceCost;
   }, [
     lmDetectionInstanceCount,
-    batchBillableModelCount,
+    batchModels,
     billingExternalRequestCreditCost,
+    billingLocalRequestCreditCost,
   ]);
   const batchHasInsufficientCredits =
     billingStatusLoaded &&
     billingCreditsRemaining !== null &&
     batchEstimatedCredits > billingCreditsRemaining;
   const dimiEta = useMemo(
-    () => estimateRemainingTime(batchDimiStartedAt, batchDimiProgress),
-    [batchDimiStartedAt, batchDimiProgress, clockTick]
+    () => estimateRemainingTime(batchDimiStartedAt, batchDimiProgress, currentTime),
+    [batchDimiStartedAt, batchDimiProgress, currentTime]
   );
   const batchEta = useMemo(
-    () => estimateRemainingTime(batchStartedAt, batchProgress),
-    [batchStartedAt, batchProgress, clockTick]
+    () => estimateRemainingTime(batchStartedAt, batchProgress, currentTime),
+    [batchStartedAt, batchProgress, currentTime]
   );
   const batchMetricComparison = useMemo(() => {
     if (!batchMetrics) return [];
@@ -597,10 +582,11 @@ export default function Home() {
   }, [batchDownloadUrl]);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("viewMode") as ViewMode | null;
-    if (stored === "single" || stored === "batch") {
-      setViewMode(stored);
-    }
+    const stored = sessionStorage.getItem("viewMode");
+    if (stored !== "single" && stored !== "batch") return;
+
+    const restoreViewMode = window.setTimeout(() => setViewMode(stored), 0);
+    return () => window.clearTimeout(restoreViewMode);
   }, []);
 
   useEffect(() => {
@@ -619,7 +605,7 @@ export default function Home() {
     }
 
     const intervalId = window.setInterval(() => {
-      setClockTick((value) => value + 1);
+      setCurrentTime(getCurrentTime());
     }, 1000);
 
     return () => window.clearInterval(intervalId);
@@ -641,6 +627,9 @@ export default function Home() {
           const settings = (await settingsResponse.json()) as BillingSettingsResponse;
           if (typeof settings.external_request_credit_cost === "number") {
             setBillingExternalRequestCreditCost(settings.external_request_credit_cost);
+          }
+          if (typeof settings.local_request_credit_cost === "number") {
+            setBillingLocalRequestCreditCost(settings.local_request_credit_cost);
           }
         }
 
@@ -998,7 +987,7 @@ export default function Home() {
     clearBatchDimiState();
     setBatchDimiStatus("processing");
     setBatchDimiError(null);
-    setBatchDimiStartedAt(Date.now());
+    setBatchDimiStartedAt(getCurrentTime());
     setBatchDimiProgress(0);
     setBatchDimiProcessed(0);
     setBatchDimiTotal(0);
@@ -1042,7 +1031,10 @@ export default function Home() {
         throw new Error(message || "DiMi preprocessing failed");
       }
 
-      const startPayload = (await startResponse.json()) as { job_id: string };
+      const startPayload = (await startResponse.json()) as {
+        job_id: string;
+        access_token: string;
+      };
       if (runId !== batchDimiRunIdRef.current) return;
 
       const pollStatus = async () => {
@@ -1050,7 +1042,7 @@ export default function Home() {
 
         const statusResponse = await fetch(
           `${API_BASE_URL}/lemmatize/batch/status/${startPayload.job_id}`,
-          { headers: buildApiHeaders() }
+          { headers: buildApiHeaders(undefined, startPayload.access_token) }
         );
         if (runId !== batchDimiRunIdRef.current) return true;
         if (!statusResponse.ok) {
@@ -1066,7 +1058,7 @@ export default function Home() {
         if (statusPayload.status === "completed") {
           const resultResponse = await fetch(
             `${API_BASE_URL}/lemmatize/batch/result/${startPayload.job_id}`,
-            { headers: buildApiHeaders() }
+            { headers: buildApiHeaders(undefined, startPayload.access_token) }
           );
           if (runId !== batchDimiRunIdRef.current) return true;
           if (!resultResponse.ok) {
@@ -1285,7 +1277,7 @@ export default function Home() {
 
     setBatchStatus("uploading");
     setBatchError(null);
-    setBatchStartedAt(Date.now());
+    setBatchStartedAt(getCurrentTime());
     setOutputPreviewJson(null);
     setBatchMetrics(null);
     setBatchProgress(0);
@@ -1316,12 +1308,15 @@ export default function Home() {
         throw new Error(message || "Batch request failed");
       }
 
-      const startPayload = (await response.json()) as { job_id: string };
+      const startPayload = (await response.json()) as {
+        job_id: string;
+        access_token: string;
+      };
       setBatchStatus("processing");
 
       const pollStatus = async () => {
         const statusResponse = await fetch(`${API_BASE_URL}/batch/status/${startPayload.job_id}`, {
-          headers: buildApiHeaders(),
+          headers: buildApiHeaders(undefined, startPayload.access_token),
         });
         if (!statusResponse.ok) {
           const message = await statusResponse.text();
@@ -1336,7 +1331,7 @@ export default function Home() {
 
         if (statusPayload.status === "completed") {
           const resultResponse = await fetch(`${API_BASE_URL}/batch/result/${startPayload.job_id}`, {
-            headers: buildApiHeaders(),
+            headers: buildApiHeaders(undefined, startPayload.access_token),
           });
           if (!resultResponse.ok) {
             const message = await resultResponse.text();
@@ -1771,7 +1766,15 @@ export default function Home() {
             {/* ── DiMi panel ── */}
             <section className={styles.batchPanel}>
               <p className={styles.boxTitle}>
-                Moralization Detection with Dictionary Approach (DiMi)
+                Moralization Detection with Dictionaries of Morality Indicating Words (DiMi)
+              </p>
+
+              <p className={styles.boxDescription}>
+                DiMi is a dictionary-based preprocessing step for detecting moralized language in text.
+                It looks for curated lemma matches in four languages and returns the matched sentence plus two sentences of context before and after the match.
+                The lexicon was used to preprocess the data in <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>.
+                You can read more about DiMi in <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Detection and Analysis of Moralization Practices Across Languages and Domains (Becker et al., 2023)</a>.
+
               </p>
 
               <section className={styles.panel}>
@@ -1848,6 +1851,19 @@ export default function Home() {
               <p className={styles.boxTitle}>
                 Moralization Analysis with Language Models
               </p>
+
+              <p className={styles.boxDescription}>
+                This section uses machine learning models to predict whether a text contains a moralization.
+                <br/>
+                You can choose between a fine-tuned model: &quot;XLM-RoBERTa&quot;, and two large language models (LLMs): &quot;Claude Haiku 4.5&quot;, and &quot;OpenAI GPT-5-mini&quot;.
+                <br/>
+                The LLMs provide a short explanation plus extracted protagonists and moral values, while &quot;XLM-RoBERTa&quot; returns only a prediction confidence because it is a classification model.
+                &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot; are general-purpose models for multiple languages, while &quot;XLM-RoBERTa&quot; was fine-tuned on the Multilingual Moralization Corpus (pending publication) and supports all available languages.
+                Each user receives 100 free credits per day. XLM-RoBERTa uses 1 credit per prediction, while Claude Haiku 4.5 and OpenAI GPT-5-mini use 5 credits per prediction.
+                <br/>
+                Language models can and will make mistakes so please use results with caution!
+              </p>
+
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleSubmit}>
                   <div className={styles.languageSwitch}>
@@ -1862,9 +1878,6 @@ export default function Home() {
                           type="button"
                           onClick={() => {
                             setLmLanguage(option.code);
-                            if (option.code !== "de" && selectedModel === "xlm-roberta") {
-                              setSelectedModel("claude");
-                            }
                           }}
                           aria-pressed={lmLanguage === option.code}
                           title={option.name}
@@ -1878,8 +1891,6 @@ export default function Home() {
                     <span className={styles.label}>Model</span>
                     <div className={`${styles.modeTabs} ${styles.lmModelTabs}`}>
                       {MODEL_OPTIONS.map((option) => {
-                        const isWarned = option.code === "xlm-roberta" && lmLanguage !== "de";
-
                         const button = (
                           <button
                             className={`${styles.modeTab} ${
@@ -1888,7 +1899,7 @@ export default function Home() {
                             type="button"
                             onClick={() => setSelectedModel(option.code)}
                             aria-pressed={selectedModel === option.code}
-                            title={isWarned ? xlmWarning : option.name}
+                            title={option.name}
                           >
                             {option.label}
                           </button>
@@ -1902,9 +1913,6 @@ export default function Home() {
                       })}
                     </div>
                   </div>
-                  {selectedModel === "xlm-roberta" && lmLanguage !== "de" && (
-                    <p className={styles.modelWarning}>{xlmWarning}</p>
-                  )}
                   <label className={styles.label} htmlFor="textInputSecondary">
                     Text input
                   </label>
@@ -2100,8 +2108,17 @@ export default function Home() {
               <p className={styles.boxTitle}>
                 Pipeline Moralization Detection (DiMi + Language Models)
               </p>
+              <p className={styles.boxDescription}>
+                This batch pipeline combines dictionary-based preprocessing with model-based moralization detection.
+                It first applies DiMi to identify moralized contexts, then runs the selected language models on the prepared records.
+                DiMi follows the approach described in <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Detection and Analysis of Moralization Practices Across Languages and Domains (Becker et al., 2023)</a>, and the XLM-RoBERTa branch is aligned with <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>.
+                If your file includes a label column, the tool also computes evaluation metrics (accuracy, precision, recall, F1).
+              </p>
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
+                <p className={styles.boxDescription}>
+                  Make sure that your input file follows the described format. The input file can be either a CSV or a JSON file.
+                </p>
                 <div className={styles.formatList}>
                   <p>
                     <b>Optional columns:</b> id and label (moralization/no_moralization,
@@ -2206,7 +2223,7 @@ export default function Home() {
               {batchFile && batchOutputFormat && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Select the input language...</span>
+                    <span className={styles.label}>Select the input text language...</span>
                     <div className={styles.modeTabs}>
                       {LANGUAGE_OPTIONS.map((option) => (
                         <button
@@ -2232,6 +2249,10 @@ export default function Home() {
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>Run DiMi preprocessing ...</p>
                   </div>
+                  <p className={styles.boxDescription}>
+                    Select whether to preprocess the input file with DiMi. If you skip this step, the language models will be run on the original input texts.
+                  </p>
+                  <br/>
                   <div className={styles.progressWrap}>
                     <div className={styles.dimiActionRow}>
                       <button
@@ -2372,9 +2393,13 @@ export default function Home() {
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>
-                      Skip instances with no DiMi Matches; these are also ignored for the metrics
+                      Skip instances with no DiMi Matches?
                       calculation
                     </p>
+                    <p className={styles.boxDescription}>
+                      Select whether instances without DiMi matches will be skipped and not included in the evaluation metrics.
+                    </p>
+                    <br/>
                   </div>
                   <p className={styles.hint}>
                     {formatInstanceLabel(dimiSkippedInstanceCount)} would be skipped out of{" "}
@@ -2408,6 +2433,12 @@ export default function Home() {
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.languageSwitch}>
                     <span className={styles.label}>Select models...</span>
+                    <p className={styles.boxDescription}>
+                      XLM-RoBERTa supports all available languages and uses 1 credit per prediction. It provides a confidence score for the moralization prediction.
+                      <br/>
+                      Claude Haiku 4.5 and OpenAI GPT-5-mini support multiple languages and use 5 credits per prediction. In addition to the prediction, these models provide an explanation for their prediction as well as additional information about moral values and protagonists.
+
+                    </p>
                     <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
                       {MODEL_OPTIONS.map((option) => (
                         <button
@@ -2425,9 +2456,6 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-                  {batchModels.includes("xlm-roberta") && batchLanguage !== "de" && (
-                    <p className={styles.modelWarning}>{xlmWarning}</p>
-                  )}
                 </div>
               )}
 
@@ -2435,7 +2463,7 @@ export default function Home() {
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>
-                      Run LM Detection ({formatInstanceLabel(lmDetectionInstanceCount)})...
+                      Run Moralization Analysis with Language Models{" "}({formatInstanceLabel(lmDetectionInstanceCount)})...
                     </p>
                   </div>
 

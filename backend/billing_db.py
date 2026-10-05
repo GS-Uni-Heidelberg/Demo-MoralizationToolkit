@@ -18,12 +18,13 @@ FREE_TIER_DAILY_CREDITS_ENV = os.environ.get("FREE_TIER_DAILY_CREDITS")
 MAX_BATCH_INSTANCES_ENV = os.environ.get("MAX_BATCH_INSTANCES")
 MAX_INPUT_TEXT_LENGTH_ENV = os.environ.get("MAX_INPUT_TEXT_LENGTH")
 EXTERNAL_REQUEST_CREDIT_COST_ENV = os.environ.get("EXTERNAL_REQUEST_CREDIT_COST")
+LOCAL_REQUEST_CREDIT_COST_ENV = os.environ.get("LOCAL_REQUEST_CREDIT_COST")
 
-DEFAULT_FREE_TIER_DAILY_CREDITS = int(FREE_TIER_DAILY_CREDITS_ENV or "5")
+DEFAULT_FREE_TIER_DAILY_CREDITS = int(FREE_TIER_DAILY_CREDITS_ENV or "100")
 DEFAULT_MAX_BATCH_INSTANCES = int(MAX_BATCH_INSTANCES_ENV or "200000")
 DEFAULT_MAX_INPUT_TEXT_LENGTH = int(MAX_INPUT_TEXT_LENGTH_ENV or "5000")
-DEFAULT_EXTERNAL_REQUEST_CREDIT_COST = int(EXTERNAL_REQUEST_CREDIT_COST_ENV or "1")
-DEFAULT_LOCAL_REQUEST_CREDIT_COST = 0
+DEFAULT_EXTERNAL_REQUEST_CREDIT_COST = int(EXTERNAL_REQUEST_CREDIT_COST_ENV or "5")
+DEFAULT_LOCAL_REQUEST_CREDIT_COST = int(LOCAL_REQUEST_CREDIT_COST_ENV or "1")
 
 DB_LOCK = threading.Lock()
 
@@ -165,6 +166,11 @@ def initialize_database() -> None:
                 connection,
                 "external_request_credit_cost",
                 EXTERNAL_REQUEST_CREDIT_COST_ENV,
+            )
+            _sync_env_override(
+                connection,
+                "local_request_credit_cost",
+                LOCAL_REQUEST_CREDIT_COST_ENV,
             )
             _ensure_token_limit_columns(connection)
             _backfill_token_limit_values(connection)
@@ -689,7 +695,8 @@ def summarize_batch_credit_need(
     selected_models: list[str],
     settings: BillingSettings,
 ) -> int:
-    external_models = [model for model in selected_models if model != "xlm-roberta"]
-    if not external_models or eligible_rows <= 0:
+    if eligible_rows <= 0:
         return 0
-    return eligible_rows * len(external_models) * settings.external_request_credit_cost
+    return eligible_rows * sum(
+        provider_credit_cost(model, settings) for model in selected_models
+    )

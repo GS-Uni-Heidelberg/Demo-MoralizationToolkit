@@ -13,10 +13,19 @@ type BillingStatusResponse = {
   free_tier_daily_credits?: number | null;
 };
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const TOKEN_STORAGE_KEY = "apiToken";
 const LEGACY_TOKEN_STORAGE_KEY = "apiKey";
-const DEFAULT_FREE_TIER_CREDITS = 5;
+const DEFAULT_FREE_TIER_CREDITS = 100;
+
+function getStoredToken(): string {
+  if (typeof window === "undefined") return "";
+  return (
+    sessionStorage.getItem(TOKEN_STORAGE_KEY) ??
+    sessionStorage.getItem(LEGACY_TOKEN_STORAGE_KEY) ??
+    ""
+  ).trim();
+}
 
 export default function FloatingKeyPanel() {
   const [open, setOpen] = useState(false);
@@ -48,14 +57,13 @@ export default function FloatingKeyPanel() {
   };
 
   useEffect(() => {
-    const storedToken =
-      localStorage.getItem(TOKEN_STORAGE_KEY) ?? localStorage.getItem(LEGACY_TOKEN_STORAGE_KEY) ?? "";
-    const trimmedToken = storedToken.trim();
-
-    if (trimmedToken) {
-      setApiToken(trimmedToken);
-      setSavedToken(trimmedToken);
-    }
+    const storedToken = getStoredToken();
+    const restoreToken = window.setTimeout(() => {
+      if (storedToken) {
+        setApiToken(storedToken);
+        setSavedToken(storedToken);
+      }
+    }, 0);
 
     const loadSettings = async () => {
       try {
@@ -72,24 +80,31 @@ export default function FloatingKeyPanel() {
     };
 
     void loadSettings();
+    return () => window.clearTimeout(restoreToken);
   }, []);
 
   useEffect(() => {
-    void refreshBillingStatus();
+    const refresh = () => {
+      void refreshBillingStatus();
+    };
+    const initialRefresh = window.setTimeout(refresh, 0);
 
     const interval = window.setInterval(() => {
-      void refreshBillingStatus();
+      refresh();
     }, 15000);
 
     const handleFocus = () => {
-      void refreshBillingStatus();
+      refresh();
     };
 
     window.addEventListener("focus", handleFocus);
     return () => {
+      window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
     };
+    // refreshBillingStatus reads the current saved token from this component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedToken]);
 
   useEffect(() => {
@@ -119,8 +134,8 @@ export default function FloatingKeyPanel() {
         }
 
         const data = (await response.json()) as BillingStatusResponse;
-        localStorage.setItem(TOKEN_STORAGE_KEY, trimmedToken);
-        localStorage.setItem(LEGACY_TOKEN_STORAGE_KEY, trimmedToken);
+        sessionStorage.setItem(TOKEN_STORAGE_KEY, trimmedToken);
+        sessionStorage.setItem(LEGACY_TOKEN_STORAGE_KEY, trimmedToken);
         setSavedToken(trimmedToken);
         setRemainingCredits(data.credits_remaining);
         window.dispatchEvent(new Event("billingstatuschange"));
@@ -132,8 +147,8 @@ export default function FloatingKeyPanel() {
         return;
       }
     } else {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
       setSavedToken("");
       setApiToken("");
       void refreshBillingStatus("");
@@ -144,8 +159,8 @@ export default function FloatingKeyPanel() {
   };
 
   const clearKey = () => {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
     setApiToken("");
     setSavedToken("");
     void refreshBillingStatus("");
@@ -174,13 +189,13 @@ export default function FloatingKeyPanel() {
         </div>
 
         <span className={styles.info}>
-        <b>Don't have a key and your coins are empty?</b>
-        <br /> Contact us via {" "} <a href="mailto:support@moralizer.ai" className={styles.link}> email{" "}
+        <b>Don&apos;t have a key and your coins are empty?</b>
+        <br /> Contact us via {" "} <a href="mailto:maria.becker@gs.uni-heidelberg.de" className={styles.link}> email{" "}
         </a>
         to get one or wait 24h for your coins to refill automatically. 
-        The free tier includes {freeTierCredits} credit(s) per day for all users! 
-        Credits are only consumed for external prompting models. 
-        Local DiMi and XLM-RoBERTa runs stay free.
+        The free tier includes {freeTierCredits} credit(s) per day for all users.
+        XLM-RoBERTa uses 1 credit per prediction. Claude Haiku 4.5 and OpenAI GPT-5-mini use 5 credits per prediction.
+        Local DiMi runs stay free.
         </span>
 
         <div className={styles.body}>
