@@ -34,7 +34,12 @@ cp .env.example .env
 
 The backend reads these variables from `backend/.env` or `backend/.env.local`:
 
-- `MODEL_DIR`: path to the local XLM-RoBERTa checkpoint.
+- `HF_TOKEN`: private Hugging Face token used only by the backend.
+- `HF_MODEL_REPO`: Hugging Face Hub repository containing the model and tokenizer.
+- `HF_INFERENCE_ENDPOINT_URL`: private Hugging Face Inference Endpoint URL.
+- `HF_SCALE_UP_TIMEOUT`: seconds to wait for a scale-to-zero replica, default `300`.
+- `HF_REQUEST_TIMEOUT_SECONDS`: backend timeout for cold starts, default `360`.
+- `HF_MORALIZATION_LABEL` and `HF_NON_MORALIZATION_LABEL`: labels stored in the model config, default `moralization` and `no_moralization` for the included checkpoint.
 - `LEMMAS_DIR`: path to the DiMi lemma files.
 - `OPENAI_API_KEY`: OpenAI API credential for the OpenAI branch.
 - `OPENAI_MODEL`: OpenAI chat model name, default `gpt-4o-mini`.
@@ -44,7 +49,6 @@ The backend reads these variables from `backend/.env` or `backend/.env.local`:
 Example:
 
 ```bash
-export MODEL_DIR=/absolute/path/to/checkpoint-1473
 export LEMMAS_DIR=/absolute/path/to/dimi
 export OPENAI_API_KEY=...
 export OPENAI_MODEL=gpt-4o-mini
@@ -52,16 +56,24 @@ export ANTHROPIC_API_KEY=...
 export ANTHROPIC_MODEL=claude-3-5-sonnet-latest
 ```
 
-The backend loads the model from:
-
-```
-models/FacebookAI-xlm-roberta-base-finetuned-base_params/checkpoint-1473
-```
-
-To override the model path:
+Upload the fine-tuned checkpoint, tokenizer, and custom Endpoint handler to a private Hub repository:
 
 ```bash
-export MODEL_DIR=/absolute/path/to/checkpoint-1473
+export HF_TOKEN=hf_...
+export HF_MODEL_REPO=your-account/moralization-xlm-roberta
+export MODEL_DIR=/absolute/path/to/checkpoint-2500
+python upload_model.py
+```
+
+Create a Hugging Face Inference Endpoint for that repository with task `Custom`, the cheapest CPU hardware, minimum replicas `0`, maximum replicas `1`, and scale-to-zero enabled. The `handler.py` file is required for the Custom task. Put the resulting Endpoint URL and the same read token in `backend/.env`. The browser sends raw text to this backend; tokenization and model inference happen inside the Hugging Face Endpoint.
+
+If the Endpoint already exists, upload the model again so that `handler.py` appears in the Hub repository, then redeploy or restart the Endpoint. Test it with:
+
+```bash
+curl -X POST "$HF_INFERENCE_ENDPOINT_URL" \
+	-H "Authorization: Bearer $HF_TOKEN" \
+	-H "Content-Type: application/json" \
+	-d '{"inputs":"Das ist absolut richtig."}'
 ```
 
 Health check:

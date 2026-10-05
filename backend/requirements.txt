@@ -1,7 +1,8 @@
 fastapi
 uvicorn[standard]
+httpx
 torch
-transformers
+huggingface_hub
 python-multipart
 stanza
 openai

@@ -17,14 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
 import openpyxl
 import stanza
-import torch
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 try:
     from dotenv import load_dotenv
@@ -59,13 +58,14 @@ from billing_db import (  # noqa: E402
     summarize_batch_credit_need,
 )
 
-DEFAULT_MODEL_DIR = (
-    ROOT_DIR
-    / "models"
-    / "FacebookAI-xlm-roberta-base-finetuned-base_params"
-    / "checkpoint-1473"
-)
-MODEL_DIR = Path(os.environ.get("MODEL_DIR", DEFAULT_MODEL_DIR))
+HF_INFERENCE_ENDPOINT_URL = os.environ.get("HF_INFERENCE_ENDPOINT_URL", "").strip()
+HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
+HF_SCALE_UP_TIMEOUT = os.environ.get("HF_SCALE_UP_TIMEOUT", "300").strip()
+HF_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("HF_REQUEST_TIMEOUT_SECONDS", "360"))
+HF_MORALIZATION_LABEL = os.environ.get("HF_MORALIZATION_LABEL", "moralization").strip().lower()
+HF_NON_MORALIZATION_LABEL = os.environ.get(
+    "HF_NON_MORALIZATION_LABEL", "no_moralization"
+).strip().lower()
 MODEL_NAME = "roberta-finetuned"
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
@@ -321,32 +321,59 @@ LEMMA_JOB_LOCK = threading.Lock()
 
 
 class ModelBundle:
-    def __init__(self, model_dir: Path) -> None:
-        if not model_dir.exists():
-            raise FileNotFoundError(f"Model directory not found: {model_dir}")
+    def __init__(self) -> None:
+        if not HF_INFERENCE_ENDPOINT_URL:
+            raise RuntimeError("HF_INFERENCE_ENDPOINT_URL is not set.")
+        if not HF_TOKEN:
+            raise RuntimeError("HF_TOKEN is not set.")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_dir)
-        self.model.eval()
-
-        self.id2label = self.model.config.id2label or {0: "no_moralization", 1: "moralization"}
-
-    def predict(self, text: str) -> PredictResponse:
-        inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=512,
+        self.client = httpx.Client(
+            timeout=httpx.Timeout(HF_REQUEST_TIMEOUT_SECONDS, connect=30.0),
+            headers={
+                "Authorization": f"Bearer {HF_TOKEN}",
+                "Content-Type": "application/json",
+                "X-Scale-Up-Timeout": HF_SCALE_UP_TIMEOUT,
+            },
         )
 
-        with torch.no_grad():
-            logits = self.model(**inputs).logits
-            probs = torch.nn.functional.softmax(logits, dim=-1).squeeze(0)
+    @staticmethod
+    def _canonical_label(label: object) -> str:
+        normalized = str(label).strip().lower()
+        if normalized == HF_MORALIZATION_LABEL or normalized in {
+            "moralization",
+            "moralized",
+            "label_1",
+            "1",
+        }:
+            return "moralization"
+        if normalized == HF_NON_MORALIZATION_LABEL or normalized in {
+            "no_moralization",
+            "non-mor",
+            "non_moralization",
+            "label_0",
+            "0",
+        }:
+            return "no_moralization"
+        return str(label)
 
-        best_idx = int(torch.argmax(probs).item())
-        label = str(self.id2label.get(best_idx, best_idx))
-        confidence = round(float(probs[best_idx].item()), 4)
+    def predict(self, text: str) -> PredictResponse:
+        response = self.client.post(
+            HF_INFERENCE_ENDPOINT_URL,
+            json={"inputs": text},
+        )
+        if response.is_error:
+            detail = response.text[:500]
+            raise RuntimeError(f"Hugging Face Endpoint returned {response.status_code}: {detail}")
+
+        payload = response.json()
+        if not isinstance(payload, list) or not payload or not all(
+            isinstance(item, dict) for item in payload
+        ):
+            raise RuntimeError("Hugging Face Endpoint returned an unexpected response.")
+
+        best_item = max(payload, key=lambda item: float(item.get("score", 0.0)))
+        label = self._canonical_label(best_item.get("label", "no_moralization"))
+        confidence = round(float(best_item.get("score", 0.0)), 4)
 
         return PredictResponse(label=label, confidence=confidence)
 
@@ -1440,7 +1467,7 @@ def run_lemma_batch_job(job: LemmaBatchJob) -> None:
 # ── SINGLETONS ────────────────────────────────────────────────────────────────
 
 try:
-    MODEL = ModelBundle(MODEL_DIR)
+    MODEL = ModelBundle()
 except Exception as exc:
     MODEL = None
     MODEL_ERROR = exc
