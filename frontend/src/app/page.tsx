@@ -2103,8 +2103,17 @@ export default function Home() {
             </section>
           </>
         ) : (
-          /* ── Batch panel ── */
-          <section className={styles.batchPanel}>
+          <>
+            <section className={styles.batchMobileNotice}>
+              <p className={styles.boxTitle}>Batch processing is desktop-only</p>
+              <p className={styles.boxDescription}>
+                Batch processing is currently supported on desktop devices only. Please open this page on a desktop computer to upload files and run batch analyses.
+              </p>
+            </section>
+
+            <div className={styles.batchDesktopContent}>
+              {/* ── Batch panel ── */}
+              <section className={styles.batchPanel}>
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
               <p className={styles.boxTitle}>
                 Pipeline Moralization Detection (DiMi + Language Models)
@@ -2725,7 +2734,9 @@ export default function Home() {
                 </div>
               </div>
             )}
-          </section>
+              </section>
+            </div>
+          </>
         )}
 
         <footer className={styles.footer}>

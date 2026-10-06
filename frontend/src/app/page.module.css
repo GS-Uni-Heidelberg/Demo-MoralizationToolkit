@@ -663,6 +663,20 @@
   animation: fadeIn 0.6s ease 0.3s both;
 }
 
+.batchDesktopContent {
+  display: block;
+}
+
+.batchMobileNotice {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  padding: 26px;
+  border-radius: 20px;
+  border: 1px solid rgba(10, 24, 35, 0.1);
+  background: rgba(255, 255, 255, 0.7);
+}
+
 .batchForm {
   display: flex;
   flex-direction: column;
@@ -1298,6 +1312,14 @@
 @media (max-width: 700px) {
   .main {
     padding: 32px 24px;
+  }
+
+  .batchDesktopContent {
+    display: none;
+  }
+
+  .batchMobileNotice {
+    display: flex;
   }
 
   .panel {
