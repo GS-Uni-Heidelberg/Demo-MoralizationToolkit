@@ -12,14 +12,14 @@ type PredictionResponse = {
   label: string;
   confidence: number;
   explanation?: string | null;
-  moral_werte?: Array<{
+  moral_values?: Array<{
     text: string;
-    moral_foundations_theory_kategorien: string[];
+    moral_foundations_theory_categories: string[];
   }> | null;
   protagonists?: Array<{
     text: string;
-    kategorie: string;
-    rollen: string[];
+    category: string;
+    roles: string[];
   }> | null;
 };
 
@@ -165,35 +165,35 @@ const BATCH_MODEL_COLORS: Record<ModelCode, string> = {
 };
 
 const PROTAGONIST_CATEGORY_CLASSES: Record<string, string> = {
-  Individuum: styles.protagonistCategoryIndividuum,
-  Menschen: styles.protagonistCategoryMenschen,
+  Individual: styles.protagonistCategoryIndividuum,
+  People: styles.protagonistCategoryMenschen,
   Institution: styles.protagonistCategoryInstitution,
-  "Soziale Gruppe": styles.protagonistCategorySozialeGruppe,
+  "Social Group": styles.protagonistCategorySozialeGruppe,
   OTHER: styles.protagonistCategoryOther,
 };
 
 const PROTAGONIST_ROLE_CLASSES: Record<string, string> = {
-  "Forderer:in": styles.protagonistRoleForderer,
-  "Adressat:in": styles.protagonistRoleAdressat,
-  "Benefizient:in": styles.protagonistRoleBenefizient,
-  "Malefizient:in": styles.protagonistRoleMalefizient,
-  "Bezug unklar": styles.protagonistRoleUnklar,
+  "Demand-maker": styles.protagonistRoleForderer,
+  Addressee: styles.protagonistRoleAdressat,
+  Beneficiary: styles.protagonistRoleBenefizient,
+  Maleficiary: styles.protagonistRoleMalefizient,
+  "Unclear relation": styles.protagonistRoleUnklar,
   NONE: styles.protagonistRoleNone,
 };
 
 const MORAL_VALUE_CATEGORY_CLASSES: Record<string, string> = {
-  Fürsorge: styles.moralValueCategoryFürsorge,
-  Schaden: styles.moralValueCategorySchaden,
+  Care: styles.moralValueCategoryFürsorge,
+  Harm: styles.moralValueCategorySchaden,
   Fairness: styles.moralValueCategoryFairness,
-  Betrug: styles.moralValueCategoryBetrug,
-  Loyalität: styles.moralValueCategoryLoyalität,
-  Verrat: styles.moralValueCategoryVerrat,
-  Autorität: styles.moralValueCategoryAutorität,
-  "Untergrabung von Autorität": styles.moralValueCategoryUntergrabung,
-  Reinheit: styles.moralValueCategoryReinheit,
-  Verfall: styles.moralValueCategoryVerfall,
-  Freiheit: styles.moralValueCategoryFreiheit,
-  Unterdrückung: styles.moralValueCategoryUnterdrückung,
+  Cheating: styles.moralValueCategoryBetrug,
+  Loyalty: styles.moralValueCategoryLoyalität,
+  Betrayal: styles.moralValueCategoryVerrat,
+  Authority: styles.moralValueCategoryAutorität,
+  "Subversion of Authority": styles.moralValueCategoryUntergrabung,
+  Purity: styles.moralValueCategoryReinheit,
+  Degradation: styles.moralValueCategoryVerfall,
+  Liberty: styles.moralValueCategoryFreiheit,
+  Oppression: styles.moralValueCategoryUnterdrückung,
 };
 
 const parseCsvText = (text: string): string[][] => {
@@ -493,7 +493,7 @@ export default function Home() {
       return [];
     }
 
-    return result?.moral_werte ?? [];
+    return result?.moral_values ?? [];
   }, [result, showMoralValuesField]);
 
   const formatInstanceLabel = (count: number) => `${count} instance${count === 1 ? "" : "s"}`;
@@ -1771,10 +1771,8 @@ export default function Home() {
               </p>
 
               <p className={styles.boxDescription}>
-                DiMi is a dictionary-based preprocessing step for detecting moralized language in text.
-                It looks for curated lemma matches in four languages and returns the matched sentence plus two sentences of context before and after the match.
-                The lexicon was used to preprocess the data in <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>.
-                You can read more about DiMi in <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Detection and Analysis of Moralization Practices Across Languages and Domains (Becker et al., 2023)</a>.
+                DiMi finds curated moral-word matches in four languages and returns the matched sentence with nearby context.
+                It was used for <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>. <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">More about DiMi</a>.
 
               </p>
 
@@ -1854,15 +1852,10 @@ export default function Home() {
               </p>
 
               <p className={styles.boxDescription}>
-                This section uses machine learning models to predict whether a text contains a moralization.
-                <br/>
-                You can choose between two fine-tuned models: &quot;XLM-RoBERTa&quot; and &quot;mmBERT&quot;, and two large language models (LLMs): &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot;.
-                <br/>
-                The LLMs provide a short explanation plus extracted protagonists and moral values, while &quot;XLM-RoBERTa&quot; and &quot;mmBERT&quot; return only a prediction confidence because they are classification models.
-                &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot; are general-purpose models for multiple languages, while the fine-tuned models were trained on the Multilingual Moralization Corpus (pending publication).
-                Each user receives 20 free credits per day for external model predictions. XLM-RoBERTa and mmBERT are free, while Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
-                <br/>
-                Language models can and will make mistakes so please use results with caution!
+                Choose between multilingual models; local fine-tuned XLM-RoBERTa or mmBERT, or LLMs; Claude Haiku 4.5 and OpenAI GPT-5-mini.
+                The fine-tuned models return a prediction and confidence; the LLMs also provide explanations, protagonists, and moral values.
+                Local models are free. External models use 1 credit per prediction, with 20 free credits daily.
+                Results may be inaccurate, so use them with caution.
               </p>
 
               <section className={styles.panel}>
@@ -1996,8 +1989,8 @@ export default function Home() {
                             <p className={styles.protagonistText}>{entry.text}</p>
                             <p className={styles.protagonistMeta}>
                               <span className={styles.protagonistRoleList}>
-                                {entry.moral_foundations_theory_kategorien.length > 0 ? (
-                                  entry.moral_foundations_theory_kategorien.map((category) => (
+                                {entry.moral_foundations_theory_categories.length > 0 ? (
+                                  entry.moral_foundations_theory_categories.map((category) => (
                                     <span
                                       key={`${entry.text}-${index}-${category}`}
                                       className={
@@ -2061,23 +2054,23 @@ export default function Home() {
                             <p className={styles.protagonistMeta}>
                               <span
                                 className={
-                                  PROTAGONIST_CATEGORY_CLASSES[entry.kategorie] ??
+                                  PROTAGONIST_CATEGORY_CLASSES[entry.category] ??
                                   styles.protagonistCategoryOther
                                 }
                               >
-                                {entry.kategorie}
+                                {entry.category}
                               </span>
                               <span className={styles.protagonistRoleList}>
-                                {entry.rollen.length > 0 ? (
-                                  entry.rollen.map((rolle) => (
+                                {entry.roles.length > 0 ? (
+                                  entry.roles.map((role) => (
                                     <span
-                                      key={`${entry.text}-${index}-${rolle}`}
+                                      key={`${entry.text}-${index}-${role}`}
                                       className={
-                                        PROTAGONIST_ROLE_CLASSES[rolle] ??
+                                        PROTAGONIST_ROLE_CLASSES[role] ??
                                         styles.protagonistRoleNone
                                       }
                                     >
-                                      {rolle}
+                                      {role}
                                     </span>
                                   ))
                                 ) : (
@@ -2107,7 +2100,7 @@ export default function Home() {
             <section className={styles.batchMobileNotice}>
               <p className={styles.boxTitle}>Batch processing is desktop-only</p>
               <p className={styles.boxDescription}>
-                Batch processing is currently supported on desktop devices only. Please open this page on a desktop computer to upload files and run batch analyses.
+                Batch processing is currently available on desktop only.
               </p>
             </section>
 
@@ -2119,24 +2112,22 @@ export default function Home() {
                 Pipeline Moralization Detection (DiMi + Language Models)
               </p>
               <p className={styles.boxDescription}>
-                This batch pipeline combines dictionary-based preprocessing with model-based moralization detection.
-                It first applies DiMi to identify moralized contexts, then runs the selected language models on the prepared records.
-                DiMi follows the approach described in <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Detection and Analysis of Moralization Practices Across Languages and Domains (Becker et al., 2023)</a>, and the XLM-RoBERTa branch is aligned with <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>.
-                If your file includes a label column, the tool also computes evaluation metrics (accuracy, precision, recall, F1).
+                DiMi finds moralized contexts before the selected models analyze them.
+                See the <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">DiMi method</a> and <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">Moralization Corpus</a>.
+                Labels enable accuracy, precision, recall, and F1 metrics.
               </p>
               <div className={styles.formatInfo}>
                 <p className={styles.formatTitle}>Formatting</p>
                 <p className={styles.boxDescription}>
-                  Make sure that your input file follows the described format. The input file can be either a CSV or a JSON file.
+                  Upload a CSV or JSON file with a <b>text</b> column.
                 </p>
                 <div className={styles.formatList}>
                   <p>
-                    <b>Optional columns:</b> id and label (moralization/no_moralization,
-                    true/false, 0/1).
+                    <b>Optional:</b> id and label (moralization/no_moralization, true/false, 0/1).
                   </p>
                   <p>If <b>no ids</b> are provided, ids are auto-generated.</p>
                   <p>If <b>no labels</b> are provided, metrics are not calculated.</p>
-                  <p>Additional columns in jsons and csvs are kept as is.</p>
+                  <p>Other columns are preserved.</p>
                 </div>
                 <div className={styles.formatSamples}>
                   <div>
@@ -2260,7 +2251,7 @@ export default function Home() {
                     <p className={styles.previewTitle}>Run DiMi preprocessing ...</p>
                   </div>
                   <p className={styles.boxDescription}>
-                    Select whether to preprocess the input file with DiMi. If you skip this step, the language models will be run on the original input texts.
+                    Run DiMi first, or skip it to analyze the original texts.
                   </p>
                   <br/>
                   <div className={styles.progressWrap}>
@@ -2444,9 +2435,8 @@ export default function Home() {
                   <div className={styles.languageSwitch}>
                     <span className={styles.label}>Select models...</span>
                     <p className={styles.boxDescription}>
-                      XLM-RoBERTa and mmBERT are free to use and provide a confidence score for the moralization prediction.
-                      <br/>
-                      Claude Haiku 4.5 and OpenAI GPT-5-mini support multiple languages and use 1 credit per prediction. In addition to the prediction, these models provide an explanation for their prediction as well as additional information about moral values and protagonists.
+                      XLM-RoBERTa and mmBERT are free and return confidence scores.
+                      Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction and also return explanations, moral values, and protagonists.
 
                     </p>
                     <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>

@@ -1,67 +1,67 @@
 output = {
-  "name": "MoralisierungOutput",
+  "name": "MoralizationOutput",
   "input_schema": {
     "type": "object",
     "properties": {
-      "moralisierung": {
+      "moralization": {
         "type": "object",
         "properties": {
-          "moral_werte": {
+          "moral_values": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
                 "text": { "type": "string" },
-                "moral_foundations_theory_kategorien": {
+                "moral_foundations_theory_categories": {
                   "type": "array",
                   "items": {
                     "type": "string",
                     "enum": [
-                      "Fürsorge", "Schaden",
-                      "Fairness", "Betrug",
-                      "Loyalität", "Verrat",
-                      "Autorität", "Untergrabung von Autorität",
-                      "Reinheit", "Verfall",
-                      "Freiheit", "Unterdrückung"
+                      "Care", "Harm",
+                      "Fairness", "Cheating",
+                      "Loyalty", "Betrayal",
+                      "Authority", "Subversion of Authority",
+                      "Purity", "Degradation",
+                      "Liberty", "Oppression"
                     ]
                   }
                 }
               },
-              "required": ["text", "moral_foundations_theory_kategorien"]
+              "required": ["text", "moral_foundations_theory_categories"]
             }
           },
-          "forderung": { "type": "string" },
-          "begruendung": { "type": "string" },
-          "enthaelt_moralisierung": { "type": "boolean" }
+          "demand": { "type": "string" },
+          "rationale": { "type": "string" },
+          "contains_moralization": { "type": "boolean" }
         },
-        "required": ["moral_werte", "forderung", "begruendung", "enthaelt_moralisierung"]
+        "required": ["moral_values", "demand", "rationale", "contains_moralization"]
       },
-      "protagonisten": {
+      "protagonists": {
         "type": "array",
         "items": {
           "type": "object",
           "properties": {
             "text": { "type": "string" },
-            "kategorie": {
+            "category": {
               "type": "string",
-              "enum": ["Individuum","Menschen","Institution","Soziale Gruppe","OTHER"]
+              "enum": ["Individual", "People", "Institution", "Social Group", "OTHER"]
             },
-            "rollen": {
+            "roles": {
               "type": "array",
               "items": {
                 "type": "string",
                 "enum": [
-                  "Forderer:in","Adressat:in",
-                  "Benefizient:in","Malefizient:in",
-                  "Bezug unklar","NONE"
+                  "Demand-maker", "Addressee",
+                  "Beneficiary", "Maleficiary",
+                  "Unclear relation", "NONE"
                 ]
               }
             }
           },
-          "required": ["text", "kategorie", "rollen"]
+          "required": ["text", "category", "roles"]
         }
       }
     },
-    "required": ["moralisierung", "protagonisten"]
+    "required": ["moralization", "protagonists"]
   }
 }

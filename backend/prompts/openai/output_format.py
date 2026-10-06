@@ -1,90 +1,90 @@
 from pydantic import BaseModel
 from typing import List
 
-class Moralwert(BaseModel):
+class MoralValue(BaseModel):
     text: str
-    moral_foundations_theory_kategorien: List[str]
+    moral_foundations_theory_categories: List[str]
 
 class Protagonist(BaseModel):
     text: str
-    kategorie: str 
-    rollen: List[str] 
+    category: str
+    roles: List[str]
 
-class Moralisierung(BaseModel):
-    moral_werte: List[Moralwert]
-    forderung: str
-    begruendung: str
-    enthaelt_moralisierung: bool
+class Moralization(BaseModel):
+    moral_values: List[MoralValue]
+    demand: str
+    rationale: str
+    contains_moralization: bool
 
-class MoralisierungOutput(BaseModel):
-    moralisierung: Moralisierung
-    protagonisten: List[Protagonist]
+class MoralizationOutput(BaseModel):
+    moralization: Moralization
+    protagonists: List[Protagonist]
 
 
 output = {
     "type": "json_schema",
     "json_schema": {
-        "name": "MoralisierungOutput",
+        "name": "MoralizationOutput",
         "schema": {
             "type": "object",
             "properties": {
-                "moralisierung": {
+                "moralization": {
                     "type": "object",
                     "properties": {
-                        "moral_werte": {
+                        "moral_values": {
                             "type": "array",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "text": {"type": "string"},
-                                        "moral_foundations_theory_kategorien": {"type": "array", "items": {"type": "string", "enum": [
-                                            "Fürsorge", "Schaden",
-                                            "Fairness", "Betrug",
-                                            "Loyalität", "Verrat",
-                                            "Autorität", "Untergrabung von Autorität",
-                                            "Reinheit", "Verfall",
-                                            "Freiheit", "Unterdrückung"
+                                        "moral_foundations_theory_categories": {"type": "array", "items": {"type": "string", "enum": [
+                                            "Care", "Harm",
+                                            "Fairness", "Cheating",
+                                            "Loyalty", "Betrayal",
+                                            "Authority", "Subversion of Authority",
+                                            "Purity", "Degradation",
+                                            "Liberty", "Oppression"
                                         ]}}
                                 },
-                                "required": ["text", "moral_foundations_theory_kategorien"],
+                                "required": ["text", "moral_foundations_theory_categories"],
                                 "additionalProperties": False
                             }
                         },
-                        "forderung": {"type": "string"},
-                        "begruendung": {"type": "string"},
-                        "enthaelt_moralisierung": {"type": "boolean"}
+                        "demand": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "contains_moralization": {"type": "boolean"}
                     },
-                    "required": ["moral_werte", "forderung", "begruendung", "enthaelt_moralisierung"],
+                    "required": ["moral_values", "demand", "rationale", "contains_moralization"],
                     "additionalProperties": False,
                 },
-                "protagonisten": {
+                "protagonists": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
                             "text": {"type": "string"},
-                            "kategorie": {"type": "string", "enum": [
-                                "Individuum",
-                                "Menschen",
+                            "category": {"type": "string", "enum": [
+                                "Individual",
+                                "People",
                                 "Institution",
-                                "Soziale Gruppe",
+                                "Social Group",
                                 "OTHER"
                             ]},
-                            "rollen": {"type": "array", "items": {"type": "string", "enum": [
-                                "Forderer:in",
-                                "Adressat:in",
-                                "Benefizient:in",
-                                "Malefizient:in",
-                                "Bezug unklar",
+                            "roles": {"type": "array", "items": {"type": "string", "enum": [
+                                "Demand-maker",
+                                "Addressee",
+                                "Beneficiary",
+                                "Maleficiary",
+                                "Unclear relation",
                                 "NONE"
                             ]}},
                         },
-                        "required": ["text", "kategorie", "rollen"],
+                        "required": ["text", "category", "roles"],
                         "additionalProperties": False,
                     },
                 },
             },
-            "required": ["moralisierung", "protagonisten"],
+            "required": ["moralization", "protagonists"],
             "additionalProperties": False,
         },
         "strict": True,

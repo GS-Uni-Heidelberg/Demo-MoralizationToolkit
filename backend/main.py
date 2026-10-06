@@ -185,7 +185,7 @@ class PredictResponse(BaseModel):
     label: str
     confidence: float
     explanation: str | None = None
-    moral_werte: list[dict[str, object]] | None = None
+    moral_values: list[dict[str, object]] | None = None
     protagonists: list[dict[str, object]] | None = None
 
 
@@ -247,7 +247,7 @@ class ModelPredictionResult:
     label: str
     confidence: float | None = None
     explanation: str | None = None
-    moral_werte: list[dict[str, object]] | None = None
+    moral_values: list[dict[str, object]] | None = None
     protagonists: list[dict[str, object]] | None = None
     raw_output: str | None = None
 
@@ -588,59 +588,69 @@ def parse_json_response(content: str, source: str) -> dict:
 
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
 
     try:
         return json.loads(cleaned)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as original_error:
+        # Models may append Markdown explanations after an otherwise valid JSON object.
+        json_start = cleaned.find("{")
+        if json_start >= 0:
+            try:
+                parsed, _end = json.JSONDecoder().raw_decode(cleaned[json_start:])
+            except json.JSONDecodeError:
+                pass
+            else:
+                if isinstance(parsed, dict):
+                    return parsed
+
         print(f"{source} response after fence cleanup: {cleaned}")
-        raise
+        raise original_error
 
 
 def parse_prediction_payload(payload: dict) -> PredictResponse:
-    if isinstance(payload.get("moralisierung"), dict):
-        moralisierung = payload["moralisierung"]
-        contains_moralisierung = bool(moralisierung.get("enthaelt_moralisierung", False))
-        moral_werte: list[dict[str, object]] | None = None
+    if isinstance(payload.get("moralization"), dict):
+        moralization = payload["moralization"]
+        contains_moralization = bool(moralization.get("contains_moralization", False))
+        moral_values: list[dict[str, object]] | None = None
         protagonists: list[dict[str, object]] | None = None
-        if contains_moralisierung and isinstance(moralisierung.get("moral_werte"), list):
-            moral_werte = [
+        if contains_moralization and isinstance(moralization.get("moral_values"), list):
+            moral_values = [
                 {
                     "text": str(item.get("text", "")),
-                    "moral_foundations_theory_kategorien": [
+                    "moral_foundations_theory_categories": [
                         str(category)
-                        for category in item.get("moral_foundations_theory_kategorien", [])
+                        for category in item.get("moral_foundations_theory_categories", [])
                         if str(category).strip()
                     ],
                 }
-                for item in moralisierung["moral_werte"]
+                for item in moralization["moral_values"]
                 if isinstance(item, dict)
             ]
-            moral_werte = [
+            moral_values = [
                 item
-                for item in moral_werte
-                if item["text"] or item["moral_foundations_theory_kategorien"]
+                for item in moral_values
+                if item["text"] or item["moral_foundations_theory_categories"]
             ]
-            if not moral_werte:
-                moral_werte = None
-        if contains_moralisierung and isinstance(payload.get("protagonisten"), list):
+            if not moral_values:
+                moral_values = None
+        if contains_moralization and isinstance(payload.get("protagonists"), list):
             protagonists = [
                 {
                     "text": str(item.get("text", "")),
-                    "kategorie": str(item.get("kategorie", "")),
-                    "rollen": [str(role) for role in item.get("rollen", []) if str(role).strip()],
+                    "category": str(item.get("category", "")),
+                    "roles": [str(role) for role in item.get("roles", []) if str(role).strip()],
                 }
-                for item in payload["protagonisten"]
+                for item in payload["protagonists"]
                 if isinstance(item, dict)
             ]
-            protagonists = [item for item in protagonists if item["text"] or item["kategorie"] or item["rollen"]]
+            protagonists = [item for item in protagonists if item["text"] or item["category"] or item["roles"]]
             if not protagonists:
                 protagonists = None
         return PredictResponse(
-            label="moralization" if contains_moralisierung else "no_moralization",
-            confidence=1.0 if contains_moralisierung else 0.0,
-            explanation=str(moralisierung.get("begruendung", "")) or None,
-            moral_werte=moral_werte,
+            label="moralization" if contains_moralization else "no_moralization",
+            confidence=1.0 if contains_moralization else 0.0,
+            explanation=str(moralization.get("rationale", "")) or None,
+            moral_values=moral_values,
             protagonists=protagonists,
         )
 
@@ -701,7 +711,7 @@ def run_model_prediction(text: str, model_code: str) -> ModelPredictionResult:
         return ModelPredictionResult(
             label=prediction.label,
             explanation=prediction.explanation,
-            moral_werte=prediction.moral_werte,
+            moral_values=prediction.moral_values,
             protagonists=prediction.protagonists,
             raw_output=raw_output,
         )
@@ -718,7 +728,7 @@ def run_model_prediction(text: str, model_code: str) -> ModelPredictionResult:
         return ModelPredictionResult(
             label=prediction.label,
             explanation=prediction.explanation,
-            moral_werte=prediction.moral_werte,
+            moral_values=prediction.moral_values,
             protagonists=prediction.protagonists,
             raw_output=raw_output,
         )
@@ -1623,11 +1633,11 @@ async def predict(
     request: PredictRequest,
     api_token: str | None = Depends(extract_api_token),
 ) -> PredictResponse:
-    if MODEL_ERROR or MODEL is None:
-        raise HTTPException(status_code=500, detail="Model failed to load")
-
     try:
         selected_model = request.model.strip().lower()
+        if selected_model in LOCAL_MODEL_CODES and (MODEL_ERROR or MODEL is None):
+            detail = "Local model is unavailable. Configure HF_INFERENCE_ENDPOINT_URL and restart the backend."
+            raise HTTPException(status_code=503, detail=detail)
         _max_batch_instances, max_input_text_length = get_effective_request_limits(api_token)
         validate_text_length(request.text, max_input_text_length)
         try:
@@ -1645,7 +1655,7 @@ async def predict(
             label=prediction.label,
             confidence=prediction.confidence if prediction.confidence is not None else 0.0,
             explanation=prediction.explanation,
-            moral_werte=prediction.moral_werte,
+            moral_values=prediction.moral_values,
             protagonists=prediction.protagonists,
         )
     except HTTPException:
