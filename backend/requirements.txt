@@ -1,10 +1,11 @@
 fastapi
 uvicorn[standard]
 httpx
-torch
-huggingface_hub
 python-multipart
+# Keep Stanza on the CPU-only PyTorch wheel; the default PyPI wheel pulls CUDA runtimes.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
 stanza
+openpyxl
 openai
-python-dotenv
 anthropic

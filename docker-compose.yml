@@ -1,0 +1,59 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_PATH: /app/backend/data/billing.sqlite3
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-https://moralization-toolkit.chai-lab.de}
+      LEMMAS_DIR: /app/models/dimi
+    networks:
+      - traefik
+    volumes:
+      - billing_data:/app/backend/data
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-web}
+      - traefik.http.routers.moralization-api.rule=Host(`moralization-toolkit.chai-lab.de`) && PathPrefix(`/api`)
+      - traefik.http.routers.moralization-api.entrypoints=websecure
+      - traefik.http.routers.moralization-api.tls=true
+      - traefik.http.routers.moralization-api.middlewares=moralization-api-strip
+      - traefik.http.middlewares.moralization-api-strip.stripprefix.prefixes=/api
+      - traefik.http.services.moralization-api.loadbalancer.server.port=8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health'); payload = json.load(response); raise SystemExit(0 if payload.get('status') == 'ok' else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-web}
+      - traefik.http.routers.moralization-frontend.rule=Host(`moralization-toolkit.chai-lab.de`)
+      - traefik.http.routers.moralization-frontend.entrypoints=websecure
+      - traefik.http.routers.moralization-frontend.tls=true
+      - traefik.http.routers.moralization-frontend.tls.certresolver=le
+      - traefik.http.services.moralization-frontend.loadbalancer.server.port=3030
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK:-web}
+    external: true
+
+volumes:
+  billing_data:

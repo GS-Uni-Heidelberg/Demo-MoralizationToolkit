@@ -13,7 +13,7 @@ type BillingStatusResponse = {
   free_tier_daily_credits?: number | null;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TOKEN_STORAGE_KEY = "apiToken";
 const LEGACY_TOKEN_STORAGE_KEY = "apiKey";
 const DEFAULT_FREE_TIER_CREDITS = 20;

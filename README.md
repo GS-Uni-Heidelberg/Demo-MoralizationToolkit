@@ -103,6 +103,26 @@ Open:
 http://localhost:3000
 ```
 
+## Docker Compose deployment
+
+Create `backend/.env` from `backend/.env.example` and fill in the provider credentials. The Compose file expects an existing external Docker network named `web`, shared with the running Traefik container. Adjust `TRAEFIK_NETWORK` if your network has another name. Then build and start both services from the repository root:
+
+```bash
+docker compose up --build -d
+```
+
+The application is available at `https://moralization-toolkit.chai-lab.de`, and the API health check is at `https://moralization-toolkit.chai-lab.de/api/health`. Traefik routes `/api` to the backend and removes that prefix before forwarding. Billing data is stored in the named `billing_data` volume.
+
+The frontend is built to call `/api` on the same hostname. To use a different public API URL, set `NEXT_PUBLIC_API_BASE_URL` before building:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=https://api.example.com docker compose up --build -d
+```
+
+The frontend API URL is baked into the Next.js build because browser requests must use a URL reachable from the user's browser. Set `FRONTEND_ORIGINS` to the deployed frontend origin when it differs from `https://moralization-toolkit.chai-lab.de`.
+
+If the Traefik installation uses a named ACME certificate resolver, add its name to both routers as `traefik.http.routers.<router-name>.tls.certresolver=<resolver-name>`.
+
 For a deployed frontend, set `NEXT_PUBLIC_API_BASE_URL` to the HTTPS origin of the
 backend before building. The local fallback is `http://localhost:8000`.
 
