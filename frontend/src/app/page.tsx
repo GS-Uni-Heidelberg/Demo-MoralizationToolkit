@@ -1772,7 +1772,7 @@ export default function Home() {
 
               <p className={styles.boxDescription}>
                 DiMi finds curated moral-word matches in four languages and returns the matched sentence with nearby context.
-                It was used for <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>. <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">More about DiMi</a>.
+                It was used for <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>. <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">More about DiMi</a>.
 
               </p>
 
@@ -2113,7 +2113,7 @@ export default function Home() {
               </p>
               <p className={styles.boxDescription}>
                 DiMi finds moralized contexts before the selected models analyze them.
-                See the <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">DiMi method</a> and <a className={styles.citationLink} href="https://arxiv.org/pdf/2512.15248" target="_blank" rel="noopener noreferrer">Moralization Corpus</a>.
+                See the <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">DiMi method</a> and <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">Moralization Corpus</a>.
                 Labels enable accuracy, precision, recall, and F1 metrics.
               </p>
               <div className={styles.formatInfo}>
