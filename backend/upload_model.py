@@ -7,15 +7,20 @@ from huggingface_hub import HfApi
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-MODEL_DIR = Path(
-    os.environ.get(
-        "MODEL_DIR",
-        ROOT_DIR
-        / "models"
-        / "FacebookAI-xlm-roberta-base-finetuned-base_params"
-        / "checkpoint-2500",
-    )
-)
+MODEL_VARIANT = os.environ.get("MODEL_VARIANT", "xlm-roberta").strip().lower()
+MODEL_DIRECTORIES = {
+    "xlm-roberta": ROOT_DIR
+    / "models"
+    / "FacebookAI-xlm-roberta-base-finetuned-base_params"
+    / "checkpoint-2500",
+    "mmbert": ROOT_DIR
+    / "models"
+    / "jhu-clsp-mmBERT-base-sft-morcorp-10epochs"
+    / "checkpoint-4400",
+}
+if MODEL_VARIANT not in MODEL_DIRECTORIES:
+    raise RuntimeError("MODEL_VARIANT must be one of: xlm-roberta, mmbert")
+MODEL_DIR = Path(os.environ.get("MODEL_DIR", MODEL_DIRECTORIES[MODEL_VARIANT]))
 HANDLER_PATH = Path(__file__).with_name("handler.py")
 REPO_ID = os.environ.get("HF_MODEL_REPO", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -35,7 +40,7 @@ api.upload_folder(
     repo_id=REPO_ID,
     repo_type="model",
     folder_path=MODEL_DIR,
-    commit_message="Upload fine-tuned XLM-R sequence classifier",
+    commit_message=f"Upload fine-tuned {MODEL_VARIANT} sequence classifier",
 )
 api.upload_file(
     path_or_fileobj=str(HANDLER_PATH),

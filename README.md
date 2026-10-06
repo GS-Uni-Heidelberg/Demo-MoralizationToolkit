@@ -37,6 +37,7 @@ The backend reads these variables from `backend/.env` or `backend/.env.local`:
 - `HF_TOKEN`: private Hugging Face token used only by the backend.
 - `HF_MODEL_REPO`: Hugging Face Hub repository containing the model and tokenizer.
 - `HF_INFERENCE_ENDPOINT_URL`: private Hugging Face Inference Endpoint URL.
+- `HF_MMBERT_INFERENCE_ENDPOINT_URL`: optional private Hugging Face Inference Endpoint URL for mmBERT.
 - `HF_SCALE_UP_TIMEOUT`: seconds to wait for a scale-to-zero replica, default `300`.
 - `HF_REQUEST_TIMEOUT_SECONDS`: backend timeout for cold starts, default `360`.
 - `HF_MORALIZATION_LABEL` and `HF_NON_MORALIZATION_LABEL`: labels stored in the model config, default `moralization` and `no_moralization` for the included checkpoint.
@@ -62,6 +63,15 @@ Upload the fine-tuned checkpoint, tokenizer, and custom Endpoint handler to a pr
 export HF_TOKEN=hf_...
 export HF_MODEL_REPO=your-account/moralization-xlm-roberta
 export MODEL_DIR=/absolute/path/to/checkpoint-2500
+python upload_model.py
+```
+
+To upload the included mmBERT checkpoint, use a separate Hub repository and
+Endpoint:
+
+```bash
+export HF_MODEL_REPO=your-account/moralization-mmbert
+export MODEL_VARIANT=mmbert
 python upload_model.py
 ```
 

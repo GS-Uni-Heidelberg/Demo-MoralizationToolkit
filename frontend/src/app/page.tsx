@@ -39,7 +39,8 @@ type BillingStatusResponse = {
 };
 
 type LanguageCode = "de" | "en" | "fr" | "it";
-type ModelCode = "xlm-roberta" | "claude" | "openai";
+type ModelCode = "xlm-roberta" | "mmbert" | "claude" | "openai";
+const LOCAL_MODEL_CODES: ModelCode[] = ["xlm-roberta", "mmbert"];
 
 type LemmaMatchResult = {
   sentence_index: number;
@@ -144,18 +145,21 @@ const MODEL_OPTIONS: Array<{
   name: string;
 }> = [
   { code: "xlm-roberta", label: "XLM-RoBERTa", name: "Fine-Tuned XLM-RoBERTa Model" },
+  { code: "mmbert", label: "mmBERT", name: "Fine-Tuned mmBERT Model" },
   { code: "claude", label: "Claude Haiku 4.5", name: "Claude Haiku 4.5" },
   { code: "openai", label: "OpenAI GPT-5 mini", name: "OpenAI GPT-5 mini" },
 ];
 
 const BATCH_MODEL_SUFFIXES: Record<ModelCode, string> = {
   "xlm-roberta": "roberta-finetuned",
+  mmbert: "mmbert-finetuned",
   claude: "claude",
   openai: "openai",
 };
 
 const BATCH_MODEL_COLORS: Record<ModelCode, string> = {
   "xlm-roberta": "#f2c479",
+  mmbert: "#7c9fca",
   claude: "#6caac9",
   openai: "#c86a5a",
 };
@@ -473,7 +477,9 @@ export default function Home() {
     return result.explanation?.trim() || "--";
   }, [result]);
   const showProtagonistsField =
-    result?.label === "moralization" && resultModel === selectedModel && selectedModel !== "xlm-roberta";
+    result?.label === "moralization" &&
+    resultModel === selectedModel &&
+    !LOCAL_MODEL_CODES.includes(selectedModel);
   const protagonistEntries = useMemo(() => {
     if (!showProtagonistsField) {
       return [];
@@ -519,7 +525,7 @@ export default function Home() {
     const perInstanceCost = batchModels.reduce(
       (total, modelCode) =>
         total +
-        (modelCode === "xlm-roberta"
+        (LOCAL_MODEL_CODES.includes(modelCode)
           ? 0
           : billingExternalRequestCreditCost),
       0
@@ -1850,11 +1856,11 @@ export default function Home() {
               <p className={styles.boxDescription}>
                 This section uses machine learning models to predict whether a text contains a moralization.
                 <br/>
-                You can choose between a fine-tuned model: &quot;XLM-RoBERTa&quot;, and two large language models (LLMs): &quot;Claude Haiku 4.5&quot;, and &quot;OpenAI GPT-5-mini&quot;.
+                You can choose between two fine-tuned models: &quot;XLM-RoBERTa&quot; and &quot;mmBERT&quot;, and two large language models (LLMs): &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot;.
                 <br/>
-                The LLMs provide a short explanation plus extracted protagonists and moral values, while &quot;XLM-RoBERTa&quot; returns only a prediction confidence because it is a classification model.
-                &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot; are general-purpose models for multiple languages, while &quot;XLM-RoBERTa&quot; was fine-tuned on the Multilingual Moralization Corpus (pending publication) and supports all available languages.
-                Each user receives 20 free credits per day for external model predictions. XLM-RoBERTa is free, while Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
+                The LLMs provide a short explanation plus extracted protagonists and moral values, while &quot;XLM-RoBERTa&quot; and &quot;mmBERT&quot; return only a prediction confidence because they are classification models.
+                &quot;Claude Haiku 4.5&quot; and &quot;OpenAI GPT-5-mini&quot; are general-purpose models for multiple languages, while the fine-tuned models were trained on the Multilingual Moralization Corpus (pending publication).
+                Each user receives 20 free credits per day for external model predictions. XLM-RoBERTa and mmBERT are free, while Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
                 <br/>
                 Language models can and will make mistakes so please use results with caution!
               </p>
@@ -1952,14 +1958,14 @@ export default function Home() {
                   </div>
                   <div>
                     <p className={styles.resultLabel}>
-                      {selectedModel === "xlm-roberta" ? "Confidence" : "Explanation"}
+                      {LOCAL_MODEL_CODES.includes(selectedModel) ? "Confidence" : "Explanation"}
                     </p>
                     <p
                       className={`${styles.resultValue} ${
-                        selectedModel === "xlm-roberta" ? "" : styles.resultValueSmall
+                        LOCAL_MODEL_CODES.includes(selectedModel) ? "" : styles.resultValueSmall
                       }`}
                     >
-                      {selectedModel === "xlm-roberta" ? confidenceLabel : explanationText}
+                      {LOCAL_MODEL_CODES.includes(selectedModel) ? confidenceLabel : explanationText}
                     </p>
                   </div>
                 </section>
@@ -2429,7 +2435,7 @@ export default function Home() {
                   <div className={styles.languageSwitch}>
                     <span className={styles.label}>Select models...</span>
                     <p className={styles.boxDescription}>
-                      XLM-RoBERTa supports all available languages and is free to use. It provides a confidence score for the moralization prediction.
+                      XLM-RoBERTa and mmBERT are free to use and provide a confidence score for the moralization prediction.
                       <br/>
                       Claude Haiku 4.5 and OpenAI GPT-5-mini support multiple languages and use 1 credit per prediction. In addition to the prediction, these models provide an explanation for their prediction as well as additional information about moral values and protagonists.
 

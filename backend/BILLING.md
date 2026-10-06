@@ -84,7 +84,7 @@ The token-specific `max_batch_instances` and `max_input_text_length` are enforce
 ## What costs credits
 
 - `openai` and `claude` predictions cost 1 credit each.
-- `xlm-roberta` predictions are free and do not use credits.
+- `xlm-roberta` and `mmbert` predictions are free and do not use credits.
 - DiMi/local lemmatization does not cost credits.
 - Anonymous requests receive 20 free credits per UTC day.
 

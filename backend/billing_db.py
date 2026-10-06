@@ -686,7 +686,7 @@ def charge_batch_credits(
 
 
 def provider_credit_cost(provider: str, settings: BillingSettings) -> int:
-    if provider == "xlm-roberta":
+    if provider in {"xlm-roberta", "mmbert"}:
         return 0
     return settings.external_request_credit_cost
 

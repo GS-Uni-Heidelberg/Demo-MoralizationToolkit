@@ -194,7 +194,7 @@ export default function FloatingKeyPanel() {
         </a>
         to get one or wait 24h for your coins to refill automatically. 
         The free tier includes {freeTierCredits} credit(s) per day for external models.
-        XLM-RoBERTa predictions are free. Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
+        XLM-RoBERTa and mmBERT predictions are free. Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
         Local DiMi runs stay free.
         </span>
 

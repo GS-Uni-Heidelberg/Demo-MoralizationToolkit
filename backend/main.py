@@ -61,6 +61,9 @@ from billing_db import (  # noqa: E402
 )
 
 HF_INFERENCE_ENDPOINT_URL = os.environ.get("HF_INFERENCE_ENDPOINT_URL", "").strip()
+HF_MMBERT_INFERENCE_ENDPOINT_URL = os.environ.get(
+    "HF_MMBERT_INFERENCE_ENDPOINT_URL", ""
+).strip()
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 HF_SCALE_UP_TIMEOUT = os.environ.get("HF_SCALE_UP_TIMEOUT", "300").strip()
 HF_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("HF_REQUEST_TIMEOUT_SECONDS", "360"))
@@ -69,6 +72,8 @@ HF_NON_MORALIZATION_LABEL = os.environ.get(
     "HF_NON_MORALIZATION_LABEL", "no_moralization"
 ).strip().lower()
 MODEL_NAME = "roberta-finetuned"
+MMBERT_MODEL_NAME = "mmbert-finetuned"
+LOCAL_MODEL_CODES = {"xlm-roberta", "mmbert"}
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 OPENAI_CLIENT = None
@@ -78,6 +83,7 @@ ANTHROPIC_PROMPT_DIR = ROOT_DIR / "backend" / "prompts" / "anthropic"
 
 MODEL_COLUMN_SUFFIXES = {
     "xlm-roberta": MODEL_NAME,
+    "mmbert": MMBERT_MODEL_NAME,
     "claude": "claude",
     "openai": "openai",
 }
@@ -348,6 +354,10 @@ class ModelBundle:
                 "X-Scale-Up-Timeout": HF_SCALE_UP_TIMEOUT,
             },
         )
+        self.endpoint_urls = {
+            "xlm-roberta": HF_INFERENCE_ENDPOINT_URL,
+            "mmbert": HF_MMBERT_INFERENCE_ENDPOINT_URL,
+        }
 
     @staticmethod
     def _canonical_label(label: object) -> str:
@@ -369,9 +379,12 @@ class ModelBundle:
             return "no_moralization"
         return str(label)
 
-    def predict(self, text: str) -> PredictResponse:
+    def predict(self, text: str, model_code: str = "xlm-roberta") -> PredictResponse:
+        endpoint_url = self.endpoint_urls.get(model_code, "")
+        if not endpoint_url:
+            raise RuntimeError(f"Inference endpoint for {model_code} is not configured.")
         response = self.client.post(
-            HF_INFERENCE_ENDPOINT_URL,
+            endpoint_url,
             json={"inputs": text},
         )
         if response.is_error:
@@ -669,8 +682,8 @@ def get_model_suffix(model_code: str) -> str:
 
 
 def run_model_prediction(text: str, model_code: str) -> ModelPredictionResult:
-    if model_code == "xlm-roberta":
-        prediction = MODEL.predict(text)
+    if model_code in LOCAL_MODEL_CODES:
+        prediction = MODEL.predict(text, model_code)
         return ModelPredictionResult(
             label=prediction.label,
             confidence=prediction.confidence,
@@ -1386,7 +1399,7 @@ def run_batch_job(job: BatchJob) -> None:
         for model_code in job.models:
             suffix = get_model_suffix(model_code)
             result_item[f"prediction_{suffix}"] = "no_dimi"
-            if model_code == "xlm-roberta":
+            if model_code in LOCAL_MODEL_CODES:
                 result_item[f"confidence_{suffix}"] = None
             else:
                 result_item[f"explanation_{suffix}"] = None
@@ -1397,7 +1410,7 @@ def run_batch_job(job: BatchJob) -> None:
                 suffix = get_model_suffix(model_code)
                 prediction = run_model_prediction(text, model_code)
                 result_item[f"prediction_{suffix}"] = prediction.label
-                if model_code == "xlm-roberta":
+                if model_code in LOCAL_MODEL_CODES:
                     result_item[f"confidence_{suffix}"] = (
                         f"{prediction.confidence:.4f}" if prediction.confidence is not None else None
                     )
@@ -1451,7 +1464,7 @@ def run_batch_job(job: BatchJob) -> None:
             for model_code in job.models:
                 suffix = get_model_suffix(model_code)
                 fieldnames.append(f"prediction_{suffix}")
-                if model_code == "xlm-roberta":
+                if model_code in LOCAL_MODEL_CODES:
                     fieldnames.append(f"confidence_{suffix}")
                 else:
                     fieldnames.extend([f"explanation_{suffix}", f"raw_output_{suffix}"])
@@ -1468,7 +1481,7 @@ def run_batch_job(job: BatchJob) -> None:
             for model_code in job.models:
                 suffix = get_model_suffix(model_code)
                 fieldnames.append(f"prediction_{suffix}")
-                if model_code == "xlm-roberta":
+                if model_code in LOCAL_MODEL_CODES:
                     fieldnames.append(f"confidence_{suffix}")
                 else:
                     fieldnames.extend([f"explanation_{suffix}", f"raw_output_{suffix}"])
