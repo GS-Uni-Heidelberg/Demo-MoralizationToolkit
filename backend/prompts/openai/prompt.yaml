@@ -7,7 +7,7 @@ user: |+
 
     Moralization must satisfy all three criteria:
     1. The text contains one or more moral values. Values may be positive (such as peace, safety, or support) or negative (such as injustice, unfairness, or insulting). They may be expressed by words or phrases, including nouns, adjectives, verbs, and evaluative descriptions.
-       Use these Moral Foundations Theory categories where applicable: Care, Harm, Fairness, Cheating, Loyalty, Betrayal, Authority, Subversion of Authority, Purity, Degradation, Liberty, Oppression.
+    Use these Moral Foundations Theory categories where applicable: Care, Harm, Fairness, Cheating, Liberty, Oppression, Loyalty, Betrayal, Authority, Subversion, Purity and Degradation.
     2. The text contains a demand to do something, refrain from doing something, or adopt a particular attitude. A demand may be explicit or implicit.
        Implicit demands count only when they can be reconstructed beyond reasonable doubt from the context. If uncertain, answer false.
     3. The moral value supports or reinforces the demand argumentatively: because something is good or bad, it should be pursued, supported, avoided, or opposed.
@@ -26,10 +26,10 @@ user: |+
     PART C: Categorize protagonists.
 
     Assign exactly one category to each protagonist:
-    - Individual: a specific person.
-    - People: people in general, such as people, the population, citizens, or residents.
-    - Institution: institutions, organizations, parties, coalitions, or countries when used as protagonists rather than locations.
-    - Social Group: a socially definable group, such as unemployed people, students, women, or parents.
+    - Individuals: a specific person.
+    - Institutions: institutions, organizations, parties, coalitions, or countries when used as protagonists rather than locations.
+    - Social Groups: a socially definable group, such as unemployed people, students, women, or parents.
+    - Generic Human: people in general, such as people, the population, citizens, or residents.
     - OTHER: anything that does not fit another category.
     </part_c>
 
@@ -37,11 +37,11 @@ user: |+
     PART D: Assign roles in the moralization.
 
     If moralization is present, assign each protagonist one or more applicable roles:
-    - Demand-maker: the person or group making the demand.
-    - Addressee: the person or group addressed by the demand.
+    - Demander: the person or group making the demand.
+    - Adressee: the person or group addressed by the demand.
     - Beneficiary: the person or group who benefits from the demand or currently suffers from the addressee's actions.
     - Maleficiary: the person or group negatively affected by the demand.
-    - Unclear relation: clearly relevant, but the exact role is uncertain.
+    - Unclear: clearly relevant, but the exact role is uncertain.
     - NONE: unrelated to the moralization.
     Multiple roles are allowed. Inclusive we/us normally refers to both the demand-maker and the addressee.
     </part_d>
@@ -58,7 +58,7 @@ user: |+
                     "rationale": "Only an action is recommended; no moral value is given as a reason.",
                     "contains_moralization": false
                 }},
-                "protagonists": [{{"text": "Wir", "category": "Institution", "roles": ["NONE"]}}]
+                "protagonists": [{{"text": "Wir", "category": "Institutions", "roles": ["NONE"]}}]
             }}
 
         - Text: "Wir sollten die Steuern erhöhen, um die Armut zu bekämpfen und Gerechtigkeit zu schaffen."
@@ -73,7 +73,7 @@ user: |+
                     "rationale": "The demand is supported by the moral values justice and fighting poverty.",
                     "contains_moralization": true
                 }},
-                "protagonists": [{{"text": "Wir", "category": "Institution", "roles": ["Demand-maker", "Beneficiary", "Addressee"]}}]
+                "protagonists": [{{"text": "Wir", "category": "Institutions", "roles": ["Demander", "Beneficiary", "Adressee"]}}]
             }}
 
         - Text: "Der Kranich ist ein Symbol für den Frieden."

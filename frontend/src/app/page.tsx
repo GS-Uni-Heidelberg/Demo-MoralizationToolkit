@@ -165,19 +165,19 @@ const BATCH_MODEL_COLORS: Record<ModelCode, string> = {
 };
 
 const PROTAGONIST_CATEGORY_CLASSES: Record<string, string> = {
-  Individual: styles.protagonistCategoryIndividuum,
-  People: styles.protagonistCategoryMenschen,
-  Institution: styles.protagonistCategoryInstitution,
-  "Social Group": styles.protagonistCategorySozialeGruppe,
+  Individuals: styles.protagonistCategoryIndividuum,
+  Institutions: styles.protagonistCategoryInstitution,
+  "Social Groups": styles.protagonistCategorySozialeGruppe,
+  "Generic Human": styles.protagonistCategoryMenschen,
   OTHER: styles.protagonistCategoryOther,
 };
 
 const PROTAGONIST_ROLE_CLASSES: Record<string, string> = {
-  "Demand-maker": styles.protagonistRoleForderer,
-  Addressee: styles.protagonistRoleAdressat,
+  Demander: styles.protagonistRoleForderer,
+  Adressee: styles.protagonistRoleAdressat,
   Beneficiary: styles.protagonistRoleBenefizient,
   Maleficiary: styles.protagonistRoleMalefizient,
-  "Unclear relation": styles.protagonistRoleUnklar,
+  Unclear: styles.protagonistRoleUnklar,
   NONE: styles.protagonistRoleNone,
 };
 
@@ -189,7 +189,7 @@ const MORAL_VALUE_CATEGORY_CLASSES: Record<string, string> = {
   Loyalty: styles.moralValueCategoryLoyalität,
   Betrayal: styles.moralValueCategoryVerrat,
   Authority: styles.moralValueCategoryAutorität,
-  "Subversion of Authority": styles.moralValueCategoryUntergrabung,
+  Subversion: styles.moralValueCategoryUntergrabung,
   Purity: styles.moralValueCategoryReinheit,
   Degradation: styles.moralValueCategoryVerfall,
   Liberty: styles.moralValueCategoryFreiheit,

@@ -20,7 +20,7 @@ output = {
                       "Care", "Harm",
                       "Fairness", "Cheating",
                       "Loyalty", "Betrayal",
-                      "Authority", "Subversion of Authority",
+                      "Authority", "Subversion",
                       "Purity", "Degradation",
                       "Liberty", "Oppression"
                     ]
@@ -44,16 +44,16 @@ output = {
             "text": { "type": "string" },
             "category": {
               "type": "string",
-              "enum": ["Individual", "People", "Institution", "Social Group", "OTHER"]
+              "enum": ["Individuals", "Institutions", "Social Groups", "Generic Human", "OTHER"]
             },
             "roles": {
               "type": "array",
               "items": {
                 "type": "string",
                 "enum": [
-                  "Demand-maker", "Addressee",
+                  "Demander", "Adressee",
                   "Beneficiary", "Maleficiary",
-                  "Unclear relation", "NONE"
+                  "Unclear", "NONE"
                 ]
               }
             }
