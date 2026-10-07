@@ -2731,6 +2731,16 @@ export default function Home() {
 
         <footer className={styles.footer}>
           <div className={styles.footerRow}>
+            <a
+              className={styles.footerLink}
+              href="https://github.com/GS-Uni-Heidelberg/Demo-MoralizationToolkit"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Explore the source code on GitHub!
+            </a>
+          </div>
+          <div className={styles.footerRow}>
             <span>
               © {currentYear} CHAI Lab - Department of German Language and Literature,
               University Heidelberg. All rights reserved.

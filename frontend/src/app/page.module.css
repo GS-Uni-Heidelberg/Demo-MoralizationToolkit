@@ -1275,6 +1275,17 @@
 .footerLink {
   color: var(--ink-600);
   text-decoration: underline;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.footerLink:hover {
+  color: var(--ink-900, #1f2933);
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+.footerLink:focus-visible {
+  outline: 2px solid var(--ink-600);
+  outline-offset: 3px;
 }
 
 .footerDivider {
