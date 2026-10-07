@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Moralization Detection Toolkit",
+  title: "Moralization Toolkit",
   description: "A tool for detecting moralizations in texts.",
 };
 

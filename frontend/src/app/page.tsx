@@ -1722,7 +1722,7 @@ export default function Home() {
     <div className={styles.page}>
       <main className={styles.main}>
         <section className={styles.hero}>
-          <p className={styles.eyebrow}>Moralization Detection Toolkit</p>
+          <p className={styles.eyebrow}>Moralization Toolkit</p>
           <h1>Analyze moral framing in texts.</h1>
           <p className={styles.subtitle}>
             Moralization detection with dictionaries and language models.
