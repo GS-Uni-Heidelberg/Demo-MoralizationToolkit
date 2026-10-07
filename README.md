@@ -1,8 +1,17 @@
-# Moralization Detection Demo
+# Moralization Toolkit
 
-Quick start for the minimal frontend + backend demo.
+The Moralization Toolkit is a web application for exploring and
+comparing moralization predictions in German, English, and French text. It
+combines fine-tuned multilingual classifiers with optional OpenAI and Claude
+models, and can also highlight DiMi lemma matches and return model-specific
+annotations such as moral values and protagonists.
+
+The deployed toolkit is available here: [https://moralization-toolkit.chai-lab.de/](https://moralization-toolkit.chai-lab.de/)
 
 ## Requirements
+Install Python and Node.js before running the application locally. The backend
+provides the FastAPI API and model integrations; the frontend provides the
+interactive analysis interface and batch-upload workflow.
 
 - Python 3.10+
 - Node.js 22.23.2 (or newer)
@@ -14,21 +23,65 @@ nvm install
 nvm use
 ```
 
-## Backend (FastAPI)
+## Run Web-Tool
+
+### Manual development run
+
+Run the backend and frontend in separate terminals:
 
 ```bash
+# Terminal 1
 cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 uvicorn main:app --reload --port 8000
+
+# Terminal 2, from the repository root
+cd frontend
+npm install
+npm run dev
 ```
+
+Open `http://localhost:3000`. The backend health check is available at
+`http://localhost:8000/health`.
+
+### Docker deployment
+
+Create `backend/.env` from `backend/.env.example`, then start both services
+from the repository root:
+
+```bash
+docker compose up --build -d
+```
+
+The Compose deployment expects an existing external Docker network named
+`web`, shared with Traefik. Set `TRAEFIK_NETWORK` if your network uses another
+name. Billing data is persisted in the named `billing_data` volume.
+
+For the default production routing, open
+`https://moralization-toolkit.chai-lab.de`. To use another frontend or API
+origin, set `FRONTEND_ORIGINS` and `NEXT_PUBLIC_API_BASE_URL` before building.
+
+Stop the services with:
+
+```bash
+docker compose down
+```
+
+## Backend
+The FastAPI backend handles prediction requests, batch jobs, lemmatization,
+provider integrations, authentication, billing, rate limiting, and CORS. Local
+classifier inference is delegated to Hugging Face Inference Endpoints, while
+the prompt-based providers are configured through the backend environment.
 
 ### Backend configuration
 
 Create a local env file before starting the backend:
 
 ```bash
+cd backend
 cp .env.example .env
 ```
 
@@ -42,21 +95,31 @@ The backend reads these variables from `backend/.env` or `backend/.env.local`:
 - `HF_REQUEST_TIMEOUT_SECONDS`: backend timeout for cold starts, default `360`.
 - `HF_MORALIZATION_LABEL` and `HF_NON_MORALIZATION_LABEL`: labels stored in the model config, default `moralization` and `no_moralization` for the included checkpoint.
 - `LEMMAS_DIR`: path to the DiMi lemma files.
+- `ENABLED_LANGUAGES`: comma-separated language codes enabled by the backend, default `de,en,fr`.
 - `OPENAI_API_KEY`: OpenAI API credential for the OpenAI branch.
 - `OPENAI_MODEL`: OpenAI chat model name, default `gpt-4o-mini`.
-- `ANTHROPIC_API_KEY`: reserved for the Claude branch.
-- `ANTHROPIC_MODEL`: reserved Claude model name, default `claude-3-5-sonnet-latest`.
+- `ANTHROPIC_API_KEY`: Anthropic API credential for the Claude branch.
+- `ANTHROPIC_MODEL`: Claude model name, default `claude-3-5-sonnet-latest`.
 
-Example:
+Billing and request-limit variables:
 
-```bash
-export LEMMAS_DIR=/absolute/path/to/dimi
-export OPENAI_API_KEY=...
-export OPENAI_MODEL=gpt-4o-mini
-export ANTHROPIC_API_KEY=...
-export ANTHROPIC_MODEL=claude-3-5-sonnet-latest
-```
+- `DATABASE_PATH`: SQLite billing database path, default `backend/data/billing.sqlite3`.
+- `FREE_TIER_DAILY_CREDITS`: daily credits available to anonymous requests, default `20`.
+- `MAX_BATCH_INSTANCES`: maximum number of batch instances per request, default `200000`.
+- `MAX_INPUT_TEXT_LENGTH`: maximum input text length, default `5000`.
+- `MAX_UPLOAD_BYTES`: maximum uploaded file size in bytes.
+- `RATE_LIMIT_REQUESTS`: maximum requests per client and endpoint within the rate-limit window.
+- `RATE_LIMIT_WINDOW_SECONDS`: rate-limit window length in seconds.
+- `EXTERNAL_REQUEST_CREDIT_COST`: credits charged for `openai` and `claude` requests, default `1`.
+- `LOCAL_REQUEST_CREDIT_COST`: credits charged for local model requests, default `0`.
+- `ADMIN_API_KEY`: optional key required for administrative token endpoints.
 
+### Encoder-Only Model Config
+The encoder-only models are fine-tuned multilingual sequence classifiers. The
+`xlm-roberta` and `mmbert` options classify text as `moralization` or
+`no_moralization`; their endpoint URLs, labels, timeouts, and Hugging Face
+credentials are configured through the variables above.
+#### Upload Models to Hugging Face
 Upload the fine-tuned checkpoint, tokenizer, and custom Endpoint handler to a private Hub repository:
 
 ```bash
@@ -75,6 +138,7 @@ export MODEL_VARIANT=mmbert
 python upload_model.py
 ```
 
+#### Create Hugging Face Inference Endpoint
 Create a Hugging Face Inference Endpoint for that repository with task `Custom`, the cheapest CPU hardware, minimum replicas `0`, maximum replicas `1`, and scale-to-zero enabled. The `handler.py` file is required for the Custom task. Put the resulting Endpoint URL and the same read token in `backend/.env`. The browser sends raw text to this backend; tokenization and model inference happen inside the Hugging Face Endpoint.
 
 If the Endpoint already exists, upload the model again so that `handler.py` appears in the Hub repository, then redeploy or restart the Endpoint. Test it with:
@@ -86,90 +150,104 @@ curl -X POST "$HF_INFERENCE_ENDPOINT_URL" \
 	-d '{"inputs":"Das ist absolut richtig."}'
 ```
 
-Health check:
+### Billing and API tokens
+
+The backend uses a SQLite billing database that is created automatically on
+startup. It is stored at `backend/data/billing.sqlite3` by default, or at the
+path configured by `DATABASE_PATH`.
+
+#### Create an API token
+
+Send a `POST` request to `/admin/api-tokens`. The required fields are
+`accredited_to` and `credits`; optional fields are `note`, `allowed_providers`,
+`max_batch_instances`, `max_input_text_length`, and `expires_at`.
+
+```bash
+curl -X POST http://localhost:8000/admin/api-tokens \
+	-H "Content-Type: application/json" \
+	-H "X-Admin-Key: your-admin-secret" \
+	-d '{
+		"accredited_to": "Research Demo",
+		"credits": 500,
+		"note": "Conference access",
+		"max_batch_instances": 1000,
+		"max_input_text_length": 10000,
+		"allowed_providers": ["openai", "claude"]
+	}'
+```
+
+The response contains the generated token. Save it in the frontend panel or
+send it with requests. If `max_batch_instances` or `max_input_text_length` is
+omitted, the current global default is stored for that token.
+
+If `ADMIN_API_KEY` is configured, token creation requires the `X-Admin-Key`
+header.
+
+#### List API tokens
+
+```bash
+curl http://localhost:8000/admin/api-tokens \
+	-H "X-Admin-Key: your-admin-secret"
+```
+
+The response includes each token's accreditation, remaining and maximum
+credits, limits, allowed providers, active status, creation time, and expiry.
+
+
+#### Check Backend is Running
+
+To check if the backend is running as expected you can do a quick health check:
 
 ```
 http://127.0.0.1:8000/health
 ```
 
-## Frontend (Next.js)
+## Frontend
+The frontend is a Next.js application running on port `3030` in development.
+Browser requests use `NEXT_PUBLIC_API_BASE_URL`, which defaults
+to the local backend URL for development and `/api` in the Docker deployment.
 
-From the repository root:
+## Related Work
+The Moralization Toolkit builds upon several of our previous works on moralization:
 
-```bash
-cd frontend
-npm install
-npm run dev
+[1] Maria Becker, Bruno Brocai, and Lars Tapken. 2023. Detection and Analysis of Moralization Practices Across Languages and Domains. In Book of Abstracts, page 147.
+[2] Maria Becker, Mirko Sommer, Lars Tapken, Yi Wan Teh, and Bruno Brocai. 2026. The Moralization Corpus: Frame-Based Annotation and Analysis of Moralizing Speech Acts across Diverse Text Genres. In Proceedings of the Fifteenth Language Resources and Evaluation Conference, pages 7069–7091, Palma de Mallorca, Spain. ELRA Language Resource Association.
+[3] Mirko Sommer and Maria Becker. 2026. Who Plays Which Role? Protagonist Detection and Classification in Moral Discourse. In Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics (Volume 4: Student Research Workshop), pages 375–392, Rabat, Morocco. Association for Computational Linguistics.
+
+## Citation
+If you use the software, cite the repository and our other works on moralization:
+
+```bibtex
+@software{moralization_toolkit,
+	author  = {Sommer, Mirko and Becker, Maria},
+  title   = {Moralization Toolkit},
+	year    = {2026},
+	url     = {https://github.com/GS-Uni-Heidelberg/Demo-MoralizationDetectionWeb},
+	note    = {Web application: https://moralization-toolkit.chai-lab.de/}
+}
 ```
 
-If your terminal is already in `frontend`, omit `cd frontend` and run only
-`npm install` followed by `npm run dev`.
-
-If you still see the Node.js version error, confirm the active version with `node --version` and switch to Node 22.23.2 or newer.
-
-Open:
-
-```
-http://localhost:3000
-```
-
-## Docker Compose deployment
-
-Create `backend/.env` from `backend/.env.example` and fill in the provider credentials. The Compose file expects an existing external Docker network named `web`, shared with the running Traefik container. Adjust `TRAEFIK_NETWORK` if your network has another name. Then build and start both services from the repository root:
-
-```bash
-docker compose up --build -d
-```
-
-The application is available at `https://moralization-toolkit.chai-lab.de`, and the API health check is at `https://moralization-toolkit.chai-lab.de/api/health`. Traefik routes `/api` to the backend and removes that prefix before forwarding. Billing data is stored in the named `billing_data` volume.
-
-The frontend is built to call `/api` on the same hostname. To use a different public API URL, set `NEXT_PUBLIC_API_BASE_URL` before building:
-
-```bash
-NEXT_PUBLIC_API_BASE_URL=https://api.example.com docker compose up --build -d
-```
-
-The frontend API URL is baked into the Next.js build because browser requests must use a URL reachable from the user's browser. Set `FRONTEND_ORIGINS` to the deployed frontend origin when it differs from `https://moralization-toolkit.chai-lab.de`.
-
-If the Traefik installation uses a named ACME certificate resolver, add its name to both routers as `traefik.http.routers.<router-name>.tls.certresolver=<resolver-name>`.
-
-For a deployed frontend, set `NEXT_PUBLIC_API_BASE_URL` to the HTTPS origin of the
-backend before building. The local fallback is `http://localhost:8000`.
-
-The backend also supports these safety settings in its environment file:
-
-- `MAX_UPLOAD_BYTES` (default `50000000`)
-- `RATE_LIMIT_REQUESTS` (default `120` per client and endpoint)
-- `RATE_LIMIT_WINDOW_SECONDS` (default `60`)
-
-The in-process rate limit is a baseline for a single worker. Use a reverse proxy
-or shared rate-limit store for multi-worker or multi-instance deployments.
-
-## Notes
-
-- CPU-only inference.
-- Backend uses CORS for http://localhost:3000.
-- Billing and token posting instructions are in [backend/BILLING.md](backend/BILLING.md).
-
-## Batch processing
-
-Upload CSV or JSON from the UI and download predictions.
-
-CSV format (first column or column named `text`, optional `label` column):
-
-```csv
-text,label
-Das ist absolut richtig.,moralization
-So etwas darf niemand tolerieren.,1
-```
-
-JSON format (list of objects with `text` and optional `label`):
-
-```json
-[
-	{"text": "Das ist absolut richtig.", "label": "moralization"},
-	{"text": "So etwas darf niemand tolerieren.", "label": 1}
-]
-
-Accepted label values: true/false, 0/1, moralization/no_moralization.
+```bibtex
+@inproceedings{becker-etal-2026-moralization,
+    title = "The Moralization Corpus: Frame-Based Annotation and Analysis of Moralizing Speech Acts across Diverse Text Genres",
+    author = "Becker, Maria  and
+      Sommer, Mirko  and
+      Tapken, Lars  and
+      Teh, Yi Wan  and
+      Brocai, Bruno",
+    editor = "Piperidis, Stelios  and
+      Bel, N{\'u}ria  and
+      van den Heuvel, Henk  and
+      Ide, Nancy  and
+      Krek, Simon  and
+      Toral, Antonio",
+    booktitle = "Proceedings of the Fifteenth Language Resources and Evaluation Conference",
+    month = may,
+    year = "2026",
+    address = "Palma de Mallorca, Spain",
+    publisher = "ELRA Language Resource Association",
+    url = "https://aclanthology.org/2026.lrec-1.563/",
+    doi = "10.63317/28h9saps9vhr",
+    pages = "7069--7091"
+}
 ```
