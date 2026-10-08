@@ -1348,7 +1348,16 @@ def compute_metrics(true_labels: list[int], predicted_labels: list[int]) -> dict
 
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    positive_f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+
+    negative_precision = tn / (tn + fn) if (tn + fn) else 0.0
+    negative_recall = tn / (tn + fp) if (tn + fp) else 0.0
+    negative_f1 = (
+        2 * negative_precision * negative_recall / (negative_precision + negative_recall)
+        if negative_precision + negative_recall
+        else 0.0
+    )
+    f1 = (positive_f1 + negative_f1) / 2
     accuracy = (tp + tn) / len(true_labels) if true_labels else 0.0
 
     return {

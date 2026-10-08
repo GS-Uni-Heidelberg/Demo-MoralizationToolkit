@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { BlockMath } from "react-katex";
 
 import styles from "./page.module.css";
 import FloatingKeyButton from "@/components/FloatingKeyButton";
@@ -64,6 +65,59 @@ type DimiPreviewRow = {
 };
 
 type BatchDimiStatus = "idle" | "processing" | "error" | "done";
+
+type InfoButtonProps = {
+  term: string;
+  description: ReactNode;
+};
+
+function InfoButton({ term, description }: InfoButtonProps) {
+  const [isPinned, setIsPinned] = useState(false);
+  const popoverId = useId();
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isPinned) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setIsPinned(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [isPinned]);
+
+  return (
+    <span
+      ref={wrapperRef}
+      className={`${styles.infoButtonWrap} ${isPinned ? styles.infoButtonPinned : ""}`}
+    >
+      <button
+        ref={buttonRef}
+        className={styles.infoButton}
+        type="button"
+        aria-label={`More information about ${term}`}
+        aria-describedby={popoverId}
+        aria-expanded={isPinned}
+        onClick={() => {
+          setIsPinned((pinned) => {
+            if (pinned) buttonRef.current?.blur();
+            return !pinned;
+          });
+        }}
+      >
+        i
+      </button>
+      <span id={popoverId} className={styles.infoPopover} role="tooltip">
+        <strong>{term}</strong>
+        <span>{description}</span>
+      </span>
+    </span>
+  );
+}
 
 
 type BatchMetrics = {
@@ -1771,15 +1825,15 @@ export default function Home() {
               </p>
 
               <p className={styles.boxDescription}>
-                DiMi finds curated moral-word matches in four languages and returns the matched sentence with nearby context.
-                It was used for <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">the Moralization Corpus (Becker et al., 2026)</a>. <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">More about DiMi</a>.
+                DiMi finds curated moral-word matches in three languages and returns the matched sentence with nearby context.
+                It was used for <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">The Moralization Corpus (Becker et al., LREC 2026)</a>. <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">More about DiMi (Becker et al., 2023)</a>.
 
               </p>
 
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleDimiSubmit}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Language</span>
+                    <span className={styles.label}>Input Language</span>
                     <div className={styles.modeTabs}>
                       {LANGUAGE_OPTIONS.map((option) => (
                         <button
@@ -1797,12 +1851,16 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-                  <a className={styles.hint}>
+                  <span className={styles.hint}>
                     {lemmaCount !== null ? `${lemmaCount} lemmas in ${LANGUAGE_OPTIONS.find((o) => o.code === dimiLanguage)?.name || dimiLanguage}-DiMi` : "loading lemmas…"}
-                  </a>
+                    <InfoButton
+                      term="Lemma"
+                      description="A lemma is a dictionary's base word form, such as run for runs or running. DiMi uses these word forms to find moralizing language in your text."
+                    />
+                  </span>
 
                   <label className={styles.label} htmlFor="dimiTextInput">
-                    Text input
+                    Text Input
                   </label>
                   <textarea
                     id="dimiTextInput"
@@ -1813,6 +1871,9 @@ export default function Home() {
                     maxLength={MAX_TEXT_LENGTH}
                     placeholder="Paste text to analyze using the DiMi lexicon..."
                   />
+                  <span className={styles.inputCharacterCount}>
+                    Characters: {dimiText.length}/{MAX_TEXT_LENGTH}
+                  </span>
 
                   <div className={styles.actions}>
                     <div className={styles.analyzeControlStack}>
@@ -1829,11 +1890,6 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    {dimiStatus !== "loading" && (
-                      <span className={styles.hint}>
-                        {dimiText.length}/{MAX_TEXT_LENGTH}
-                      </span>
-                    )}
                   </div>
                 </form>
               </section>
@@ -1854,14 +1910,14 @@ export default function Home() {
               <p className={styles.boxDescription}>
                 Choose between multilingual models; local fine-tuned XLM-RoBERTa or mmBERT, or LLMs; Claude Haiku 4.5 and OpenAI GPT-5-mini.
                 The fine-tuned models return a prediction and confidence; the LLMs also provide explanations, protagonists, and moral values.
-                Local models are free. External models use 1 credit per prediction, with 20 free credits daily.
+                Local models are free. External models use 1 credit per prediction, with 20 free credits daily across all users!
                 Results may be inaccurate, so use them with caution.
               </p>
 
               <section className={styles.panel}>
                 <form className={styles.form} onSubmit={handleSubmit}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Language</span>
+                    <span className={styles.label}>Input Language</span>
                     <div className={styles.modeTabs}>
                       {LANGUAGE_OPTIONS.map((option) => (
                         <button
@@ -1882,7 +1938,17 @@ export default function Home() {
                     </div>
                   </div>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Model</span>
+                    <span className={styles.label}>
+                      Model
+                      <InfoButton
+                        term="Model"
+                        description={`Local models:
+XLM-RoBERTa and mmBERT are open models fine-tuned specifically to detect moralization. They run locally, do not send your text to an external provider, and are free to use.
+
+Closed-source models:
+Claude and OpenAI are proprietary online services. They can provide explanations, moral values, and protagonists, but your text is sent to the selected provider. Each prediction costs ${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}.`}
+                      />
+                    </span>
                     <div className={`${styles.modeTabs} ${styles.lmModelTabs}`}>
                       {MODEL_OPTIONS.map((option) => {
                         const button = (
@@ -1908,7 +1974,7 @@ export default function Home() {
                     </div>
                   </div>
                   <label className={styles.label} htmlFor="textInputSecondary">
-                    Text input
+                    Text Input
                   </label>
                   <textarea
                     id="textInputSecondary"
@@ -1919,6 +1985,13 @@ export default function Home() {
                     maxLength={MAX_TEXT_LENGTH}
                     placeholder="Paste text to analyze for moralization..."
                   />
+                  <span className={styles.inputCharacterCount}>
+                    Characters: {text.length}/{MAX_TEXT_LENGTH}
+                    <span className={styles.inputMetaDivider}> · </span>
+                    Cost: {LOCAL_MODEL_CODES.includes(selectedModel)
+                      ? "Free"
+                      : `${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}`}
+                  </span>
                   <div className={styles.actions}>
                     <div className={styles.analyzeControlStack}>
                       <button
@@ -1934,11 +2007,6 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    {status !== "loading" && (
-                      <span className={styles.hint}>
-                        {text.length}/{MAX_TEXT_LENGTH}
-                      </span>
-                    )}
                   </div>
                 </form>
               </section>
@@ -1946,12 +2014,34 @@ export default function Home() {
               {shouldShowResult && result && (
                 <section className={styles.resultCard}>
                   <div>
-                    <p className={styles.resultLabel}>Prediction</p>
+                    <p className={styles.resultLabel}>
+                      Prediction
+                      <InfoButton
+                        term="Prediction"
+                        description="The model's classification of the text: moralization or no moralization."
+                      />
+                    </p>
                     <p className={styles.resultValue}>{result.label.replace("_", " ")}</p>
                   </div>
                   <div>
                     <p className={styles.resultLabel}>
-                      {LOCAL_MODEL_CODES.includes(selectedModel) ? "Confidence" : "Explanation"}
+                      {LOCAL_MODEL_CODES.includes(selectedModel) ? (
+                        <>
+                          Confidence
+                          <InfoButton
+                            term="Confidence"
+                            description="The model's estimate of how strongly it supports this prediction. It is not a guarantee that the prediction is correct."
+                          />
+                        </>
+                      ) : (
+                        <>
+                          Explanation
+                          <InfoButton
+                            term="Explanation"
+                            description="A short explanation generated by the language model for why it made this prediction."
+                          />
+                        </>
+                      )}
                     </p>
                     <p
                       className={`${styles.resultValue} ${
@@ -1967,7 +2057,27 @@ export default function Home() {
               {showMoralValuesField && (
                 <section className={`${styles.resultCard} ${styles.protagonistsCard}`}>
                   <div>
-                    <p className={styles.resultLabel}>Moral values</p>
+                    <p className={styles.resultLabel}>
+                      Moral values
+                      <InfoButton
+                        term="Moral values"
+                        description={
+                          <>
+                            Words or phrases that express a value judgment, such as care, fairness,
+                            loyalty, or authority. See {" "}
+                            <a
+                              className={styles.infoPopoverLink}
+                              href="https://aclanthology.org/2026.lrec-1.563/"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              The Moralization Corpus (Becker et al., LREC 2026)
+                            </a>
+                            .
+                          </>
+                        }
+                      />
+                    </p>
                     {/*
                     <div className={styles.protagonistLegend}>
                       <div className={styles.protagonistLegendSection}>
@@ -2021,7 +2131,28 @@ export default function Home() {
               {showProtagonistsField && (
                 <section className={`${styles.resultCard} ${styles.protagonistsCard}`}>
                   <div>
-                    <p className={styles.resultLabel}>Protagonists</p>
+                    <p className={styles.resultLabel}>
+                      Protagonists
+                      <InfoButton
+                        term="Protagonists"
+                        description={
+                          <>
+                            The protagonists involved in the moralization and their role ('Maleficiary', 'Beneficiary', ...) in the moralizations as well as their group ('Generic Human', 'Institutions', ...).
+                            See {" "}
+                            <a
+                              className={styles.infoPopoverLink}
+                              href="https://aclanthology.org/2026.eacl-srw.27/"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Who Plays Which Role? Protagonist Detection and Classification in Moral Discourse
+                              (Sommer &amp; Becker, EACL 2026)
+                            </a> 
+                            {" "}for more information.
+                          </>
+                        }
+                      />
+                    </p>
                     {/*
                     <div className={styles.protagonistLegend}>
                       <div className={styles.protagonistLegendSection}>
@@ -2113,11 +2244,11 @@ export default function Home() {
               </p>
               <p className={styles.boxDescription}>
                 DiMi finds moralized contexts before the selected models analyze them.
-                See the <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">DiMi method</a> and <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">Moralization Corpus</a>.
+                See <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">DiMi (Becker et al., 2023)</a> and <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">The Moralization Corpus (Becker et al., LREC 2026)</a>.
                 Labels enable accuracy, precision, recall, and F1 metrics.
               </p>
               <div className={styles.formatInfo}>
-                <p className={styles.formatTitle}>Formatting</p>
+                <p className={styles.formatTitle}>Input File Formatting</p>
                 <p className={styles.boxDescription}>
                   Upload a CSV or JSON file with a <b>text</b> column.
                 </p>
@@ -2147,7 +2278,7 @@ export default function Home() {
               </div>
 
               <div className={styles.sectionBox}>
-                <p className={styles.previewTitle}>Upload input file ...</p>
+                <p className={styles.previewTitle}>Upload Input File</p>
                 <input
                   className={styles.fileInput}
                   type="file"
@@ -2163,7 +2294,7 @@ export default function Home() {
 
               {batchFile && (
                 <div className={`${styles.previewCard} ${styles.fadeInSection}`}>
-                  <p className={styles.previewTitle}>Input preview</p>
+                  <p className={styles.previewTitle}>Input Preview</p>
                   {inputPreviewJson ? (
                     <pre className={`${styles.previewJson} ${styles.previewJsonLight}`}>
                       {inputPreviewJson}
@@ -2197,7 +2328,21 @@ export default function Home() {
               {batchFile && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Select output file format...</span>
+                    <span className={styles.label}>
+                      Select Output File Format
+                      <InfoButton
+                        term="Output file formats"
+                        description={
+                          <>
+                            <strong>CSV</strong> saves the results as a table for spreadsheet
+                            programs.
+                            <br />
+                            <strong>JSON</strong> saves the results as structured text for
+                            software and data-processing tools.
+                          </>
+                        }
+                      />
+                    </span>
                     <div className={styles.modeTabs}>
                       {[
                         { code: "csv", label: "CSV", name: "CSV" },
@@ -2224,7 +2369,7 @@ export default function Home() {
               {batchFile && batchOutputFormat && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Select the input text language...</span>
+                    <span className={styles.label}>Input Language</span>
                     <div className={styles.modeTabs}>
                       {LANGUAGE_OPTIONS.map((option) => (
                         <button
@@ -2248,10 +2393,10 @@ export default function Home() {
               {batchFile && batchOutputFormat && batchLanguage && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
-                    <p className={styles.previewTitle}>Run DiMi preprocessing ...</p>
+                    <p className={styles.previewTitle}>DiMi Preprocessing</p>
                   </div>
                   <p className={styles.boxDescription}>
-                    Run DiMi first, or skip it to analyze the original texts.
+                    Run DiMi first, to create sub-instances (2 sentences before and after the sentence with the DiMi match) or skip it to analyze the original texts.
                   </p>
                   <br/>
                   <div className={styles.progressWrap}>
@@ -2302,7 +2447,7 @@ export default function Home() {
               {batchDimiStatus === "done" && batchDimiPreparedFile && !batchDimiSkipped && (
                 <div className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}>
                   <p className={styles.previewTitle}>
-                    DiMi preview ({(batchOutputFormat ?? "csv").toUpperCase()})
+                    DiMi Preview ({(batchOutputFormat ?? "csv").toUpperCase()})
                   </p>
                   {batchOutputFormat === "json" ? (
                     dimiPreviewJson ? (
@@ -2394,8 +2539,7 @@ export default function Home() {
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>
-                      Skip instances with no DiMi Matches?
-                      calculation
+                      Skip Instances without DiMi Matches?
                     </p>
                     <p className={styles.boxDescription}>
                       Select whether instances without DiMi matches will be skipped and not included in the evaluation metrics.
@@ -2433,11 +2577,23 @@ export default function Home() {
               {batchDimiStatus === "done" && batchDimiPreparedFile && skipNoDimiMatches !== null && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.languageSwitch}>
-                    <span className={styles.label}>Select models...</span>
-                    <p className={styles.boxDescription}>
-                      XLM-RoBERTa and mmBERT are free and return confidence scores.
-                      Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction and also return explanations, moral values, and protagonists.
+                    <span className={styles.label}>
+                      Select Models
+                      <InfoButton
+                        term="Model"
+                        description={`Local models:
+XLM-RoBERTa and mmBERT are open models fine-tuned specifically to detect moralization. They run locally, do not send your text to an external provider, and are free to use.
 
+Closed-source models:
+Claude and OpenAI are proprietary online services. They can provide explanations, moral values, and protagonists, but your text is sent to the selected provider. Each prediction costs ${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}.`}
+                      />
+                    </span>
+                    <p className={styles.boxDescription}>
+                      Choose between multilingual models; local fine-tuned XLM-RoBERTa or mmBERT, or LLMs; Claude Haiku 4.5 and OpenAI GPT-5-mini.
+                      The fine-tuned models return a prediction and confidence; the LLMs also provide explanations, protagonists, and moral values.
+                      Local models are free. External models use 1 credit per prediction, with 20 free credits daily across all users!
+                      Results may be inaccurate, so use them with caution.
+                      You can select multiple models at once.
                     </p>
                     <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
                       {MODEL_OPTIONS.map((option) => (
@@ -2463,7 +2619,7 @@ export default function Home() {
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>
-                      Run Moralization Analysis with Language Models{" "}({formatInstanceLabel(lmDetectionInstanceCount)})...
+                      Run Moralization Analysis with Language Models{" "}({formatInstanceLabel(lmDetectionInstanceCount)})
                     </p>
                   </div>
 
@@ -2473,6 +2629,10 @@ export default function Home() {
                         Not enough credits for this batch. Need {batchEstimatedCredits}, have {billingCreditsRemaining}.
                       </p>
                     )}
+
+                    <p className={styles.hint}>
+                      Cost: {batchEstimatedCredits} credit{batchEstimatedCredits === 1 ? "" : "s"}
+                    </p>
 
                     <button
                       className={`${styles.primaryButton} ${styles.compactButton}`}
@@ -2526,7 +2686,7 @@ export default function Home() {
                   className={`${styles.previewCard} ${styles.previewDark} ${styles.outputCard}`}
                 >
                   <p className={styles.previewTitle}>
-                    Output preview ({(batchOutputFormat ?? "csv").toUpperCase()})
+                    Output Preview ({(batchOutputFormat ?? "csv").toUpperCase()})
                   </p>
                   {batchOutputFormat === "csv" ? (
                     outputPreview.length > 0 ? (
@@ -2648,35 +2808,110 @@ export default function Home() {
                     <div key={suffix} className={`${styles.resultCard} ${styles.metricsCard}`}>
                       <span className={styles.metricsTitle}>Metrics - {modelLabel}</span>
                       <div>
-                        <p className={styles.resultLabel}>Accuracy</p>
+                        <div className={styles.resultLabel}>
+                          Accuracy
+                          <InfoButton
+                            term="Accuracy"
+                            description={
+                              <>
+                                The share of all items that the model classified correctly,
+                                including both moralization and thematization.
+                                <BlockMath math="\mathrm{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}" />
+                              </>
+                            }
+                          />
+                        </div>
                         <p className={styles.resultValue}>{metrics.accuracy}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>Precision</p>
+                        <div className={styles.resultLabel}>
+                          Precision
+                          <InfoButton
+                            term="Precision"
+                            description={
+                              <>
+                                Of the items marked as moralized, the share that really are
+                                moralized.
+                                <BlockMath math="\mathrm{Precision} = \frac{TP}{TP + FP}" />
+                              </>
+                            }
+                          />
+                        </div>
                         <p className={styles.resultValue}>{metrics.precision}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>Recall</p>
+                        <div className={styles.resultLabel}>
+                          Recall
+                          <InfoButton
+                            term="Recall"
+                            description={
+                              <>
+                                Of all moralized items, the share that the model found.
+                                <BlockMath math="\mathrm{Recall} = \frac{TP}{TP + FN}" />
+                              </>
+                            }
+                          />
+                        </div>
                         <p className={styles.resultValue}>{metrics.recall}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>F1</p>
+                        <div className={styles.resultLabel}>
+                          F1
+                          <InfoButton
+                            term="F1 score"
+                            description={
+                              <>
+                                The F1 score shown here is macro F1. It calculates an F1 score for
+                                both classes, moralization (mor) and thematization (them), and gives them
+                                equal weight.
+                                <BlockMath math="\mathrm{Macro\ F1} = \frac{F1_{mor} + F1_{them}}{2}" />
+                                Each class F1 is calculated as:
+                                <BlockMath math="F1 = \frac{2 \times precision \times recall}{precision + recall}" />
+                                Higher values indicate a better balance.
+                              </>
+                            }
+                          />
+                        </div>
                         <p className={styles.resultValue}>{metrics.f1}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>TP</p>
+                        <p className={styles.resultLabel}>
+                          TP
+                          <InfoButton
+                            term="True Positive (TP)"
+                            description="A text that is moralized and the model correctly identifies as moralized."
+                          />
+                        </p>
                         <p className={styles.resultValue}>{metrics.tp}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>FP</p>
+                        <p className={styles.resultLabel}>
+                          FP
+                          <InfoButton
+                            term="False Positive (FP)"
+                            description="A text that is not moralized but the model incorrectly identifies as moralized."
+                          />
+                        </p>
                         <p className={styles.resultValue}>{metrics.fp}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>TN</p>
+                        <p className={styles.resultLabel}>
+                          TN
+                          <InfoButton
+                            term="True Negative (TN)"
+                            description="A text that is not moralized and the model correctly identifies as not moralized."
+                          />
+                        </p>
                         <p className={styles.resultValue}>{metrics.tn}</p>
                       </div>
                       <div>
-                        <p className={styles.resultLabel}>FN</p>
+                        <p className={styles.resultLabel}>
+                          FN
+                          <InfoButton
+                            term="False Negative (FN)"
+                            description="A text that is moralized but the model incorrectly identifies as not moralized."
+                          />
+                        </p>
                         <p className={styles.resultValue}>{metrics.fn}</p>
                       </div>
                     </div>

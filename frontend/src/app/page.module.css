@@ -39,7 +39,7 @@
 }
 
 .eyebrow {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.2em;
   font-size: 12px;
@@ -85,6 +85,18 @@
   color: var(--ink-700);
 }
 
+.inputCharacterCount {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-500);
+}
+
+.inputMetaDivider {
+  margin: 0 4px;
+}
+
 .textarea {
   min-height: 160px;
   resize: vertical;
@@ -114,7 +126,7 @@
 .analyzeControlStack {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -190,6 +202,11 @@
   animation: fadeIn 0.6s ease 0.2s both;
 }
 
+.resultCard:has(.infoButtonPinned) {
+  position: relative;
+  z-index: 10;
+}
+
 .protagonistsCard {
   margin-top: -8px;
 }
@@ -209,6 +226,97 @@
   font-size: 12px;
   color: rgba(249, 244, 236, 0.65);
   margin-bottom: 8px;
+}
+
+.infoButtonWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: middle;
+  top: -2px;
+}
+
+.infoButton {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: currentColor;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.infoButton:hover,
+.infoButton:focus-visible {
+  background: rgba(249, 244, 236, 0.16);
+}
+
+.infoButton:focus-visible {
+  outline: 2px solid #f2c479;
+  outline-offset: 3px;
+}
+
+.infoPopover {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 10px);
+  left: 50%;
+  display: flex;
+  width: min(280px, 70vw);
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid rgba(249, 244, 236, 0.2);
+  border-radius: 10px;
+  background: #fdf7f2;
+  color: var(--ink-900);
+  box-shadow: 0 12px 28px rgba(10, 24, 35, 0.28);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+  transform: translateX(-50%);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.infoButtonPinned .infoPopover {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.infoPopover strong {
+  color: var(--ink-900);
+  font-weight: 700;
+}
+
+.infoPopover > span {
+  white-space: pre-line;
+}
+
+.infoPopoverLink {
+  color: #1b5f79;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.infoPopoverLink:hover,
+.infoPopoverLink:focus-visible {
+  color: #0a1823;
 }
 
 .resultValue {
@@ -887,6 +995,11 @@
   border: 1px solid rgba(10, 24, 35, 0.12);
   padding: 12px;
   background: rgba(255, 255, 255, 0.95);
+}
+
+.sectionBox:has(.infoButtonPinned) {
+  position: relative;
+  z-index: 10;
 }
 
 .primarySection {

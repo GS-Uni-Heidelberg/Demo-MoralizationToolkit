@@ -36,6 +36,7 @@ export default function FloatingKeyPanel() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const previousCreditsRef = useRef<number | null>(null);
 
   const refreshBillingStatus = async (tokenOverride?: string) => {
     const token = tokenOverride ?? savedToken.trim();
@@ -106,6 +107,13 @@ export default function FloatingKeyPanel() {
     // refreshBillingStatus reads the current saved token from this component.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedToken]);
+
+  useEffect(() => {
+    if (remainingCredits === 0 && previousCreditsRef.current !== 0) {
+      setOpen(true);
+    }
+    previousCreditsRef.current = remainingCredits;
+  }, [remainingCredits]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
