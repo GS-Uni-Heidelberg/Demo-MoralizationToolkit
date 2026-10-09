@@ -1783,6 +1783,18 @@ export default function Home() {
           </p>
         </section>
 
+        <section className={styles.batchPanel}>
+              <p className={styles.boxDescription}>
+                Moralizations - appeals to moral values such as fairness, care or freedom used to justify a position or demand - are a central persuasive strategy in political, media and science communication.
+                <br/>
+                <b>The Moralization Toolkit</b>, developed at the <a className={styles.citationLink} href="https://chai-lab.de/" target="_blank" rel="noopener noreferrer">CHAI Lab</a> (University Heidelberg) detects them in German, English and French texts in two steps:<br />
+                <strong>(1)</strong> DiMi, a lexicon-based approach, finds candidate passages via curated morality-indicating words;<br />
+                <strong>(2)</strong> fine-tuned models and large language models then assess whether these passages are actually moralizing and, in the case of LLMs, provide explanations, protagonists, and moral values.
+                <br/>
+                This two-step method was used to compile <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">The Moralization Corpus (Becker et al., LREC 2026)</a>.
+              </p>
+        </section>
+
         <section className={styles.modeSwitch}>
           <div className={styles.modeTabs}>
             <button
@@ -1811,8 +1823,8 @@ export default function Home() {
         <section>
           <p className={styles.modeHint}>
             {viewMode === "single"
-              ? "Analyze one sentence at a time."
-              : "Upload CSV or JSON and download results."}
+              ? "Analyze one text at a time."
+              : "Upload CSV or JSON with multiple text instances and download your results."}
           </p>
         </section>
 
@@ -1821,13 +1833,13 @@ export default function Home() {
             {/* ── DiMi panel ── */}
             <section className={styles.batchPanel}>
               <p className={styles.boxTitle}>
-                Moralization Detection with Dictionaries of Morality Indicating Words (DiMi)
+                Step 1 – Find Candidates: Dictionary-Based Search (DiMi)
               </p>
 
               <p className={styles.boxDescription}>
-                DiMi finds curated moral-word matches in three languages and returns the matched sentence with nearby context.
-                It was used for <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">The Moralization Corpus (Becker et al., LREC 2026)</a>. <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">More about DiMi (Becker et al., 2023)</a>.
-
+                The Dictionary of Morality Indicating Words (DiMi) searches your text for words from curated lexicons of morality-indicating words in German, English and French and returns each match with its surrounding context (Sentence with Match +/- 2 Sentences). For details on the method, see <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Becker et al. (2023)</a>. 
+                <br/>
+                Matches are moralization candidates only. Verify them with the language models in Step 2.
               </p>
 
               <section className={styles.panel}>
@@ -1904,14 +1916,13 @@ export default function Home() {
             {/* ── LM panel ── */}
             <section className={styles.batchPanel}>
               <p className={styles.boxTitle}>
-                Moralization Analysis with Language Models
+                Step 2 – Classify, Analyze, and Explain: Language Models
               </p>
 
               <p className={styles.boxDescription}>
-                Choose between multilingual models; local fine-tuned XLM-RoBERTa or mmBERT, or LLMs; Claude Haiku 4.5 and OpenAI GPT-5-mini.
-                The fine-tuned models return a prediction and confidence; the LLMs also provide explanations, protagonists, and moral values.
-                Local models are free. External models use 1 credit per prediction, with 20 free credits daily across all users!
-                Results may be inaccurate, so use them with caution.
+                Choose between two types of multilingual models. The fine-tuned models XLM-RoBERTa and mmBERT run locally, are free to use and return a label with a confidence score. The LLMs Claude Haiku 4.5 and GPT-5 mini additionally explain their decision and identify the moral values and protagonists involved. Each LLM prediction costs 1 credit, and 20 free credits are available per day. 
+                <br/>
+                Automatic predictions can be wrong, so treat them as a starting point for analysis, not as ground truth.
               </p>
 
               <section className={styles.panel}>
@@ -1946,7 +1957,7 @@ export default function Home() {
 XLM-RoBERTa and mmBERT are open models fine-tuned specifically to detect moralization. They run locally, do not send your text to an external provider, and are free to use.
 
 Closed-source models:
-Claude and OpenAI are proprietary online services. They can provide explanations, moral values, and protagonists, but your text is sent to the selected provider. Each prediction costs ${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}.`}
+Claude Haiku 4.5 and GPT-5 mini are proprietary models accessed via external APIs. They can provide explanations, moral values, and protagonists, but your text is sent to the selected provider. Each prediction costs ${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}, 20 credits per day are free.`}
                       />
                     </span>
                     <div className={`${styles.modeTabs} ${styles.lmModelTabs}`}>
@@ -2240,11 +2251,12 @@ Claude and OpenAI are proprietary online services. They can provide explanations
               <section className={styles.batchPanel}>
             <form className={styles.batchForm} onSubmit={handleBatchSubmit}>
               <p className={styles.boxTitle}>
-                Pipeline Moralization Detection (DiMi + Language Models)
+                Two-Step Moralization Detection: DiMi + Language Models
               </p>
               <p className={styles.boxDescription}>
-                DiMi finds moralized contexts before the selected models analyze them.
-                See <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">DiMi (Becker et al., 2023)</a> and <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">The Moralization Corpus (Becker et al., LREC 2026)</a>.
+                The Dictionary of Morality Indicating Words (DiMi) searches your text for words from curated lexicons of morality-indicating words in German, English and French and returns each match with its surrounding context (Sentence with Match +/- 2 Sentences). For details on the method, see <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Becker et al. (2023)</a>.
+                <br />
+                The selected language models then assess whether these passages are actually moralizing and, in the case of LLMs, provide explanations, protagonists, and moral values. See <a className={styles.citationLink} href="https://aclanthology.org/2026.lrec-1.563/" target="_blank" rel="noopener noreferrer">The Moralization Corpus (Becker et al., LREC 2026)</a>.
                 Labels enable accuracy, precision, recall, and F1 metrics.
               </p>
               <div className={styles.formatInfo}>
@@ -2393,10 +2405,12 @@ Claude and OpenAI are proprietary online services. They can provide explanations
               {batchFile && batchOutputFormat && batchLanguage && (
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
-                    <p className={styles.previewTitle}>DiMi Preprocessing</p>
+                    <p className={styles.previewTitle}>Step 1 – Find Candidates: Dictionary-Based Search (DiMi)</p>
                   </div>
                   <p className={styles.boxDescription}>
-                    Run DiMi first, to create sub-instances (2 sentences before and after the sentence with the DiMi match) or skip it to analyze the original texts.
+                  The Dictionary of Morality Indicating Words (DiMi) searches your text for words from curated lexicons of morality-indicating words in German, English and French and returns each match with its surrounding context (Sentence with Match +/- 2 Sentences). For details on the method, see <a className={styles.citationLink} href="https://ids-pub.bsz-bw.de/frontdoor/deliver/index/docId/12239/file/ICLC_2023_Book_of_abstracts.pdf#page=147" target="_blank" rel="noopener noreferrer">Becker et al. (2023)</a>. 
+                  <br/>
+                  You can optionally skip this step.
                   </p>
                   <br/>
                   <div className={styles.progressWrap}>
@@ -2578,22 +2592,20 @@ Claude and OpenAI are proprietary online services. They can provide explanations
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.languageSwitch}>
                     <span className={styles.label}>
-                      Select Models
+                      Select Models for Step 2
                       <InfoButton
                         term="Model"
                         description={`Local models:
 XLM-RoBERTa and mmBERT are open models fine-tuned specifically to detect moralization. They run locally, do not send your text to an external provider, and are free to use.
 
 Closed-source models:
-Claude and OpenAI are proprietary online services. They can provide explanations, moral values, and protagonists, but your text is sent to the selected provider. Each prediction costs ${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}.`}
+Claude Haiku 4.5 and GPT-5 mini are proprietary models accessed via external APIs. They can provide explanations, moral values, and protagonists, but your text is sent to the selected provider. Each prediction costs ${billingExternalRequestCreditCost} credit${billingExternalRequestCreditCost === 1 ? "" : "s"}, 20 credits per day are free.`}
                       />
                     </span>
                     <p className={styles.boxDescription}>
-                      Choose between multilingual models; local fine-tuned XLM-RoBERTa or mmBERT, or LLMs; Claude Haiku 4.5 and OpenAI GPT-5-mini.
-                      The fine-tuned models return a prediction and confidence; the LLMs also provide explanations, protagonists, and moral values.
-                      Local models are free. External models use 1 credit per prediction, with 20 free credits daily across all users!
-                      Results may be inaccurate, so use them with caution.
-                      You can select multiple models at once.
+                      Choose between two types of multilingual models. The fine-tuned models XLM-RoBERTa and mmBERT run locally, are free to use and return a label with a confidence score. The LLMs Claude Haiku 4.5 and GPT-5 mini additionally explain their decision and identify the moral values and protagonists involved. Each LLM prediction costs 1 credit, and 20 free credits are available per day. 
+                      <br/>
+                      Automatic predictions can be wrong, so treat them as a starting point for analysis, not as ground truth.
                     </p>
                     <div className={`${styles.modeTabs} ${styles.batchModelTabs}`}>
                       {MODEL_OPTIONS.map((option) => (
@@ -2619,7 +2631,7 @@ Claude and OpenAI are proprietary online services. They can provide explanations
                 <div className={`${styles.sectionBox} ${styles.fadeInSection}`}>
                   <div className={styles.boxHeader}>
                     <p className={styles.previewTitle}>
-                      Run Moralization Analysis with Language Models{" "}({formatInstanceLabel(lmDetectionInstanceCount)})
+                        Step 2 – Classify, Analyze, and Explain: Language Models{" "}({formatInstanceLabel(lmDetectionInstanceCount)})
                     </p>
                   </div>
 

@@ -185,7 +185,7 @@ export default function FloatingKeyPanel() {
         className={`${styles.fab} ${coins === 0 ? styles.fabEmpty : ""}`}
         onClick={() => setOpen((v) => !v)}
       >
-        {coins === 0 ? "💰 Add More Coins" : `💰 ${coins}`}
+        {coins === 0 ? "💰 Add More Credits" : `💰 ${coins}`}
       </button>
 
       <div className={`${styles.panel} ${open ? styles.open : ""}`}>
@@ -197,13 +197,11 @@ export default function FloatingKeyPanel() {
         </div>
 
         <span className={styles.info}>
-        <b>Don&apos;t have a key and your coins are empty?</b>
-        <br /> Contact us via {" "} <a href="mailto:maria.becker@gs.uni-heidelberg.de" className={styles.link}> email{" "}
-        </a>
-        to get one or wait 24h for your coins to refill automatically. 
-        The free tier includes {freeTierCredits} credit(s) per day for external models.
-        XLM-RoBERTa and mmBERT predictions are free. Claude Haiku 4.5 and OpenAI GPT-5-mini use 1 credit per prediction.
-        Local DiMi runs stay free.
+        <b>No API token and out of credits?</b> 
+        <br/>
+        Email us to request an API token, or wait 24 hours for your credits to refill automatically. The free tier includes {freeTierCredits} credits per day for Claude Haiku 4.5 and GPT-5 mini (1 credit per prediction). DiMi, XLM-RoBERTa and mmBERT are always free. 
+        <br/>
+        <a href="mailto:maria.becker@gs.uni-heidelberg.de" className={styles.link}>Contact us via email</a>.
         </span>
 
         <div className={styles.body}>
